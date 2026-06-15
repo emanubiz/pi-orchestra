@@ -24,7 +24,7 @@ User / Kanban / handoff  →  inject into node terminal
                                 ▼
                            pi CLI (node-pty)
                                 │
-              @@HANDOFF:target@@  →  deliverCall()  →  inject into target terminal
+         @@HANDOFF:<handle> … @@END  →  deliverCall()  →  inject into target terminal
 ```
 
 ## Node states
@@ -54,7 +54,7 @@ There is no separate `steer` API: intervention is **terminal-native** — you ty
 Agents delegate via a **text block** parsed by `backend/pi-extensions/call-agent.ts` on `turn_end`:
 
 ```
-@@HANDOFF:<targetNodeId>
+@@HANDOFF:<recipient-handle>
 <complete, self-contained instructions for the next agent>
 @@END
 ```
@@ -64,7 +64,9 @@ Why output parsing instead of a custom pi tool?
 - Works on **any provider**, including Cursor composer (which may not expose extension tools)
 - No model cooperation required beyond following the system prompt appendix
 
-The backend validates the edge `source → target`, ensures the target terminal exists, and injects the message.
+**Recipient addressing.** Node ids are UUIDs, which models don't echo reliably, and labels (roles) repeat when a role is parallelised. So each node gets a short, unique **handle** derived from its label (`developer-1`, `developer-2`), listed in the orchestration appendix; that handle is what agents write after `@@HANDOFF:`. `PtyHub.deliverCall` resolves the recipient against the sender's *outgoing* neighbours by handle, then raw UUID, then an unambiguous label, with a single-target fallback — and nudges the sender if it still can't resolve, so a hand-off never fails silently.
+
+**Direction & termination.** Only outgoing edges define who an agent may delegate to. Handing off the next step is the default, but it is not mandatory: a node may end the chain (e.g. an approved final review) by not emitting a block. The backend validates the resolved edge `source → target`, ensures the target terminal exists, and injects the message.
 
 ### Kanban integration
 
