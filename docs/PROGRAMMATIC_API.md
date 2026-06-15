@@ -2,7 +2,7 @@
 
 REST and CLI surface for **host integrations** — Hermes Desktop tab, OpenClaw plugin, VSCode/Cursor extension, CI pipelines.
 
-> **Status:** P0 orchestration endpoints are implemented. The CLI wrapper and granular node/edge editing are still planned.
+> **Status:** P0 orchestration endpoints are implemented and stable. The CLI wrapper, granular node/edge editing, and multi-runtime node support are planned next.
 
 ## Design goals
 
@@ -32,6 +32,8 @@ GET /api/health
 GET /api/info
 → { ok, name, version, port, defaultCwd, wsPath }
 ```
+
+> Both endpoints are stable and used by host integrations (VSCode, Hermes, OpenClaw) for readiness checks.
 
 ### Prompts
 

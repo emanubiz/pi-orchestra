@@ -262,9 +262,10 @@ Orchestra provides:
 |----------|---------|
 | `GET /api/health` | Host readiness check |
 | `GET /api/info` | Default cwd, port |
-| `PUT /api/v1/orchestra/boards/:id/graph` | Load graph (planned) |
-| `POST /api/v1/orchestra/boards/:id/run` | Start flow (planned) |
-| `ws://…/ws` | Live control (today) |
+| `PUT /api/v1/orchestra/boards/:id/graph` | Load graph ✅ |
+| `POST /api/v1/orchestra/boards/:id/run` | Start flow ✅ |
+| `POST /api/v1/orchestra/flows` | High-level create+run ✅ |
+| `ws://…/ws` | Live control ✅ |
 
 Full spec: [PROGRAMMATIC_API.md](./PROGRAMMATIC_API.md).
 
@@ -274,7 +275,7 @@ Full spec: [PROGRAMMATIC_API.md](./PROGRAMMATIC_API.md).
 
 ```
 Phase 0  ✅ Standalone solid (PTY + WS + docs)
-Phase 1  🔜 Programmatic API P0 (graph load + run + status REST)
+Phase 1  ✅ Programmatic API P0 (boards + graph + run + status + auth)
 Phase 2  🔜 VSCode extension (webview + subprocess)
 Phase 3  🔜 Cursor extension (repackage + cursor runtime sketch)
 Phase 4  🔜 Hermes H2 embed contract + optional Desktop PR

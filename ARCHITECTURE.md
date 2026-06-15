@@ -33,8 +33,10 @@ User / Kanban / handoff  →  inject into node terminal
 |-------|---------|
 | `idle` | No active pi process (or exited) |
 | `running` | pi terminal alive / working |
+| `done` | Session completed successfully |
+| `error` | Session exited with an error (message propagated to frontend) |
 
-Status is driven by PTY lifecycle (`spawn` → `running`, `onExit` → `idle`).
+Status is driven by PTY lifecycle (`spawn` → `running`, `onExit` → `idle` / `done` / `error`). The frontend displays per-node error messages inline on the card when a node enters the `error` state.
 
 ## User intervention
 
@@ -84,12 +86,13 @@ Valid columns: `todo`, `in_progress`, `test`, `review`, `done`.
 
 | Layer | Tech |
 |-------|------|
-| UI | React 19, Vite, `@xyflow/react`, Tailwind, xterm.js |
-| Realtime | WebSocket |
-| API | Fastify REST |
-| Orchestration | Node.js + `node-pty` + pi CLI |
+| UI | React 19, Vite, `@xyflow/react`, Tailwind v4 (`@tailwindcss/vite`), xterm.js, Zustand |
+| Realtime | WebSocket (`@fastify/websocket`) |
+| API | Fastify 5 REST (prompt CRUD, workflow CRUD, orchestration CRUD) |
+| Orchestration | Node.js + `node-pty` + pi CLI + `BoardManager` |
 | Handoff hook | pi extension (`call-agent.ts`) |
-| Storage | SQLite (`better-sqlite3`) |
+| Storage | SQLite (`better-sqlite3`) — prompts, workflows, boards |
+| Auth (optional) | `PI_ORCHESTRA_TOKEN` — shared-secret for programmatic API |
 
 ## Project layout
 
@@ -101,21 +104,26 @@ pi-orchestra/
 │   ├── EXTENSIONS_ROADMAP.md
 │   ├── HERMES_DESKTOP.md
 │   └── PROGRAMMATIC_API.md
-├── prompts/                 # seed builtin markdown
+├── prompts/                 # seed builtin markdown (9 roles)
 ├── backend/
 │   ├── pi-extensions/
 │   │   └── call-agent.ts    # @@HANDOFF / @@CARD parser
 │   └── src/
-│       ├── index.ts         # Fastify + REST + static frontend
-│       ├── db/              # SQLite schema, prompts, workflows
-│       ├── pty/PtyHub.ts    # spawn pi, inject, handoff delivery
-│       ├── ws/handler.ts    # WebSocket protocol
+│       ├── index.ts         # Fastify + REST + WS + static frontend
+│       ├── db/index.ts      # SQLite schema, prompt CRUD, workflow CRUD, board CRUD
+│       ├── pty/PtyHub.ts    # spawn pi, inject, handoff delivery, PTY lifecycle
+│       ├── ws/handler.ts    # WebSocket protocol (attach, input, resize, graph load…)
+│       ├── routes/orchestra.ts  # /api/v1/orchestra — programmatic board/flow REST API
+│       ├── orchestra/BoardManager.ts  # board state + graph management, bridges db ↔ PtyHub
 │       └── types.ts
 └── frontend/
     └── src/
-        ├── components/      # FlowCanvas, AgentNode, TerminalPanel, KanbanBoard…
-        ├── stores/          # board + runtime state (zustand)
-        └── hooks/           # useOrchestraWs
+        ├── components/      # FlowCanvas, AgentNode, TerminalPanel, TerminalOverlay,
+        │                    # KanbanBoard, PromptLibrary, WorkflowPicker, NodeInspector,
+        │                    # SystemPromptModal, BoardTabs
+        ├── stores/          # boardStore, runtimeStore, kanbanStore (zustand)
+        ├── hooks/           # useOrchestraWs
+        └── lib/             # api, ptyBus, termTheme, termFit
 ```
 
 ## WebSocket protocol
@@ -125,10 +133,14 @@ pi-orchestra/
 | Event | Payload |
 |-------|---------|
 | `connected` | handshake |
-| `node_status` | `{ boardId, nodeId, status }` |
-| `pty_output` | `{ boardId, nodeId, data, replay? }` |
+| `node_status` | `{ boardId, nodeId, status, message? }` |
+| `pty_output` | `{ boardId, nodeId, data, replay?, cols?, rows? }` |
+| `pty_size` | `{ boardId, nodeId, cols, rows }` — PTY geometry broadcast (read-only mirrors use this to scale) |
 | `pty_exit` | `{ boardId, nodeId, code }` |
 | `card_status` | `{ boardId, column }` |
+| `stream` | `{ boardId, nodeId, kind, text }` — structured streaming (relayed from pi agent): `text`, `thinking`, `tool_start`, `tool_end` |
+| `message_in` | `{ boardId, nodeId, source, text }` — completed message (relayed from pi agent) |
+| `turn_end` | `{ boardId, nodeId }` — agent turn finished (relayed from pi agent); frontend flushes stream buffer |
 | `error` | `{ message, boardId?, nodeId? }` |
 
 ### Client → server
@@ -159,7 +171,7 @@ All messages may include `boardId` (defaults to `default`).
 | `POST /internal/call-agent` | Handoff delivery (from pi extension) |
 | `POST /internal/card-status` | Kanban card move (from pi extension) |
 
-See [docs/PROGRAMMATIC_API.md](./docs/PROGRAMMATIC_API.md) for the planned extension/orchestration API.
+See [docs/PROGRAMMATIC_API.md](./docs/PROGRAMMATIC_API.md) for the full programmatic orchestration API (board lifecycle, graph load, flow execution, auth).
 
 ## Environment variables
 
@@ -169,6 +181,7 @@ See [docs/PROGRAMMATIC_API.md](./docs/PROGRAMMATIC_API.md) for the planned exten
 | `PI_ORCHESTRA_URL` | `http://localhost:<port>` | URL injected into pi nodes |
 | `PI_ORCHESTRA_ROOT` | repo root | Bundled prompts location |
 | `PI_ORCHESTRA_DATA_DIR` | `<root>/data` | SQLite database directory |
+| `PI_ORCHESTRA_TOKEN` | (empty — no auth) | Shared secret for programmatic API auth |
 | `VITE_API_BASE` | (empty) | Frontend build-time backend URL |
 
 ## Multi-board (repo tabs)
@@ -198,9 +211,23 @@ Each board tab = one `cwd` + workflow snapshot + isolated `boardId:nodeId` PTY s
 
 See [docs/EXTENSIONS_ROADMAP.md](./docs/EXTENSIONS_ROADMAP.md).
 
+## Key features
+
+### canBeFinal — chain termination control
+
+Each node has a `canBeFinal` flag (default: `true`). When `false`, the system prompt instructs the agent that it **must** hand off to a connected node — it is not allowed to end the chain. This is toggled live from the UI (flag icon on the node card); if a running node's finality flips, `PtyHub` injects a mid-flow rule-change notification so the agent adapts immediately.
+
+### Prompt override
+
+Every node carries a `promptId` (base prompt from the library) and an optional `promptOverride` string. The override replaces the base prompt content; if empty, the library prompt is used. The `NodeInspector` panel and `SystemPromptModal` provide the editing UI.
+
+### Board persistence
+
+Boards (cwd, label, graph snapshot) are persisted in the `boards` SQLite table. On backend restart, `BoardManager` re-hydrates all boards and replays their graphs into `PtyHub` so handles, handoff resolution, and status queries work immediately.
+
 ## Out of scope (v1 standalone)
 
 - Per-node model config UI
 - Run history / analytics
-- Auth / multi-user
+- Multi-user / RBAC
 - Edge conditions / labels

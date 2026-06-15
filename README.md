@@ -55,6 +55,7 @@ In Chrome/Edge, use the browser **Install** action. The service worker caches st
 | `PI_ORCHESTRA_PORT` | Backend port (default 3847) |
 | `PI_ORCHESTRA_URL` | URL pi nodes use to call back (default `http://localhost:<port>`) |
 | `PI_ORCHESTRA_DATA_DIR` | SQLite location |
+| `PI_ORCHESTRA_TOKEN` | Shared secret for programmatic API auth (optional) |
 | `VITE_API_BASE` | Custom backend URL at frontend build time |
 
 ## Documentation
@@ -64,7 +65,20 @@ In Chrome/Edge, use the browser **Install** action. The service worker caches st
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Current system design, WS protocol, handoff |
 | [docs/EXTENSIONS_ROADMAP.md](./docs/EXTENSIONS_ROADMAP.md) | VSCode, Cursor, Hermes, OpenClaw — planned integrations |
 | [docs/HERMES_DESKTOP.md](./docs/HERMES_DESKTOP.md) | Hermes Desktop analysis |
-| [docs/PROGRAMMATIC_API.md](./docs/PROGRAMMATIC_API.md) | Planned REST/CLI API for host integrations |
+| [docs/PROGRAMMATIC_API.md](./docs/PROGRAMMATIC_API.md) | REST/CLI API for programmatic orchestration (boards, flows, auth) |
+
+## Programmatic API
+
+Board lifecycle, graph load, and flow execution are available as a REST API at `/api/v1/orchestra/*`. Useful for CI pipelines, host integrations (VSCode, Hermes, OpenClaw), and scripting.
+
+```bash
+# Create a board, load a graph, and run a flow
+curl -s http://localhost:3847/api/v1/orchestra/flows \
+  -H 'Content-Type: application/json' \
+  -d '{ "name": "auth", "cwd": "/path/to/repo", "graph": { ... }, "message": "Implement auth", "wait": true }'
+```
+
+Details: [docs/PROGRAMMATIC_API.md](./docs/PROGRAMMATIC_API.md).
 
 ## Extension roadmap (not implemented yet)
 
