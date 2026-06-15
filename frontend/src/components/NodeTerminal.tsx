@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
-import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
-import { onPtyOutput } from "../lib/ptyBus";
+import { onPtyOutput, onPtySize } from "../lib/ptyBus";
 import { TERM_FONT, TERM_THEME, useTerminalBridge } from "../lib/termTheme";
 import { useRuntimeStore } from "../stores/runtimeStore";
 
@@ -11,7 +10,6 @@ export function NodeTerminal({ nodeId }: { nodeId: string }) {
   const { boardId, send } = useTerminalBridge();
   const hostRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
-  const fitRef = useRef<FitAddon | null>(null);
   const [live, setLive] = useState(false);
   const connected = useRuntimeStore((s) => s.connected);
 
@@ -31,43 +29,60 @@ export function NodeTerminal({ nodeId }: { nodeId: string }) {
       convertEol: false,
       minimumContrastRatio: 1,
     });
-    const fit = new FitAddon();
-    term.loadAddon(fit);
     term.open(host);
     termRef.current = term;
-    fitRef.current = fit;
 
+    // pi is a full-screen TUI that emits absolute-cursor escape sequences sized
+    // for the shared PTY (owned by the interactive panel/overlay). Replaying that
+    // stream into a grid of a DIFFERENT size garbles it (the infamous staircase).
+    // So we render the mirror at the PTY's exact cols/rows and scale it down with
+    // CSS to fit the card — faithful, just smaller.
+    const xtermEl = host.querySelector(".xterm") as HTMLElement | null;
+    const rescale = () => {
+      if (!xtermEl) return;
+      const natW = xtermEl.offsetWidth;
+      const natH = xtermEl.offsetHeight;
+      if (!natW || !natH || !host.clientWidth || !host.clientHeight) return;
+      const scale = Math.min(host.clientWidth / natW, host.clientHeight / natH);
+      xtermEl.style.transformOrigin = "top left";
+      xtermEl.style.transform = `scale(${scale})`;
+    };
+
+    const applySize = (cols: number, rows: number) => {
+      if (cols > 0 && rows > 0 && (cols !== term.cols || rows !== term.rows)) {
+        term.resize(cols, rows);
+      }
+      // Let xterm relayout, then measure and scale.
+      requestAnimationFrame(rescale);
+    };
+
+    const unsubSize = onPtySize(key, applySize);
     const unsub = onPtyOutput(key, (data, replay) => {
       if (replay) term.reset();
       if (data.length > 0) setLive(true);
-      term.write(data);
+      term.write(data, () => requestAnimationFrame(rescale));
     });
 
-    // Attach only to receive scrollback/replay. Do NOT resize the shared PTY:
-    // the interactive terminal (side panel or overlay) owns the dimensions.
+    // Attach only to receive scrollback/replay (and the PTY size). Do NOT resize
+    // the shared PTY: the interactive terminal owns the dimensions.
     send({ type: "attach_node", nodeId, cols: 80, rows: 24, spawn: false });
 
-    const ro = new ResizeObserver(() => {
-      try {
-        fit.fit();
-      } catch {
-        /* mid-teardown */
-      }
-    });
+    const ro = new ResizeObserver(() => rescale());
     ro.observe(host);
+    requestAnimationFrame(rescale);
 
     return () => {
       ro.disconnect();
       unsub();
+      unsubSize();
       term.dispose();
       termRef.current = null;
-      fitRef.current = null;
     };
   }, [boardId, nodeId, send, connected]);
 
   // pointer-events off so dragging/clicking the node still works through it.
   return (
-    <div className="relative h-full w-full">
+    <div className="relative h-full w-full overflow-hidden">
       <div ref={hostRef} className="h-full w-full" style={{ pointerEvents: "none" }} />
       {!live && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[10px] text-zinc-600">

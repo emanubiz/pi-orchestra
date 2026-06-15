@@ -64,8 +64,20 @@ function handleMessage(ws: WebSocket, msg: Record<string, unknown>): void {
       const rows = (msg.rows as number) || 24;
       const spawnIfMissing = msg.spawn !== false; // mini terminals pass spawn:false
       const buffer = ptyHub.ensure(boardId, nodeId, cols, rows, spawnIfMissing);
-      // Replay scrollback only to the requesting client.
-      ws.send(JSON.stringify({ type: "pty_output", boardId, nodeId, data: buffer, replay: true }));
+      // Replay scrollback only to the requesting client, tagged with the PTY's
+      // real size so read-only mirrors can render/scale it faithfully.
+      const size = ptyHub.size(boardId, nodeId);
+      ws.send(
+        JSON.stringify({
+          type: "pty_output",
+          boardId,
+          nodeId,
+          data: buffer,
+          replay: true,
+          cols: size?.cols,
+          rows: size?.rows,
+        }),
+      );
       break;
     }
 

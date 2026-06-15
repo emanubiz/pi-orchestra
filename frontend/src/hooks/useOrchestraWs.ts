@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useRuntimeStore } from "../stores/runtimeStore";
-import { emitPtyExit, emitPtyOutput } from "../lib/ptyBus";
+import { emitPtyExit, emitPtyOutput, emitPtySize } from "../lib/ptyBus";
 import { normalizeColumn, useKanbanStore } from "../stores/kanbanStore";
 import { wsUrl } from "../lib/api";
 
@@ -74,10 +74,25 @@ export function useOrchestraWs(activeBoardId: string) {
             }
             break;
           case "pty_output":
+            // A replay carries the PTY's real size so mirrors render faithfully.
+            if (typeof msg.cols === "number" && typeof msg.rows === "number") {
+              emitPtySize(
+                `${boardId}:${msg.nodeId as string}`,
+                msg.cols as number,
+                msg.rows as number,
+              );
+            }
             emitPtyOutput(
               `${boardId}:${msg.nodeId as string}`,
               msg.data as string,
               Boolean(msg.replay),
+            );
+            break;
+          case "pty_size":
+            emitPtySize(
+              `${boardId}:${msg.nodeId as string}`,
+              msg.cols as number,
+              msg.rows as number,
             );
             break;
           case "pty_exit":

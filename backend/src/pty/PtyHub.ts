@@ -284,6 +284,10 @@ export class PtyHub {
     const k = key(boardId, nodeId);
     this.sessions.set(k, session);
     this.broadcast({ type: "node_status", boardId, nodeId, status: "running" });
+    // Tell read-only mirrors the PTY's real size so they can render pi's
+    // absolute-cursor output faithfully (and scale it down) instead of fitting
+    // a narrower grid that would garble it.
+    this.broadcast({ type: "pty_size", boardId, nodeId, cols, rows });
 
     term.onData((data) => {
       session.buffer = (session.buffer + data).slice(-MAX_BUFFER);
@@ -420,6 +424,14 @@ export class PtyHub {
     } catch {
       // terminal may have just exited
     }
+    // Keep read-only mirrors in sync with the new PTY dimensions.
+    this.broadcast({ type: "pty_size", boardId, nodeId, cols, rows });
+  }
+
+  /** Current PTY dimensions for a node, if it has a running session. */
+  size(boardId: string, nodeId: string): { cols: number; rows: number } | undefined {
+    const s = this.sessions.get(key(boardId, nodeId));
+    return s ? { cols: s.cols, rows: s.rows } : undefined;
   }
 
   /** Kill and respawn a node's terminal (fresh pi session). */
