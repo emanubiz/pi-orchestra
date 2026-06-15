@@ -82,8 +82,8 @@ function AgentNodeComponent({ id, data, selected }: NodeProps & { data: Workflow
           }`}
           title={
             canBeFinal
-              ? "Può essere nodo finale (può chiudere il giro). Click: forza l'hand-off."
-              : "Deve passare la palla a un nodo collegato. Click: consenti la chiusura."
+              ? "Can be a final node (may end the chain). Click to force a hand-off."
+              : "Must hand off to a connected node. Click to allow ending the chain."
           }
           onClick={(e) => {
             e.stopPropagation();

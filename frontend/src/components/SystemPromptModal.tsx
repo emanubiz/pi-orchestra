@@ -80,7 +80,7 @@ export function SystemPromptModal({ label, data, onSave, onClose }: SystemPrompt
               className="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-md bg-violet-500/15 text-violet-300 border border-violet-500/30 hover:bg-violet-500/25"
             >
               <Save size={11} strokeWidth={2} />
-              Salva
+              Save
             </button>
             <button
               type="button"
@@ -102,8 +102,7 @@ export function SystemPromptModal({ label, data, onSave, onClose }: SystemPrompt
           />
         </div>
         <div className="px-4 py-1.5 text-[10px] text-zinc-600 border-t border-white/5 shrink-0">
-          Le modifiche si applicano al prossimo avvio del terminale del nodo (usa Restart per
-          riavviarlo subito).
+          Changes apply the next time the node's terminal starts (use Restart to reboot it now).
         </div>
       </div>
     </div>
