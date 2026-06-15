@@ -104,6 +104,7 @@ export class PtyHub {
     }
   }
 
+  /** Nodes this node can hand off to: the targets of its outgoing edges. */
   private outgoingTargets(boardId: string, nodeId: string): WorkflowNode[] {
     const graph = this.graphs.get(boardId);
     if (!graph) return [];
@@ -120,6 +121,36 @@ export class PtyHub {
     return Boolean(graph?.edges.some((e) => e.sourceNodeId === from && e.targetNodeId === to));
   }
 
+  /**
+   * Short, unique, model-friendly handle per node, derived from its label.
+   * Labels are roles and can repeat (e.g. two "Developer" nodes running in
+   * parallel), so duplicates are suffixed: developer-1, developer-2. This is the
+   * id agents use in @@HANDOFF — they can't be trusted to echo a long UUID, and
+   * the bare label is ambiguous when a role is parallelised.
+   */
+  private handles(boardId: string): Map<string, string> {
+    const map = new Map<string, string>();
+    const graph = this.graphs.get(boardId);
+    if (!graph) return map;
+    const nodes = [...graph.nodes.values()];
+    const slug = (s: string) =>
+      s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "agent";
+    const total = new Map<string, number>();
+    for (const n of nodes) total.set(slug(n.label), (total.get(slug(n.label)) ?? 0) + 1);
+    const seen = new Map<string, number>();
+    for (const n of nodes) {
+      const base = slug(n.label);
+      if ((total.get(base) ?? 0) > 1) {
+        const i = (seen.get(base) ?? 0) + 1;
+        seen.set(base, i);
+        map.set(n.id, `${base}-${i}`);
+      } else {
+        map.set(n.id, base);
+      }
+    }
+    return map;
+  }
+
   /** System-prompt appendix telling an agent which nodes it may hand off to. */
   private connectionsAppendix(boardId: string, nodeId: string): string {
     const targets = this.outgoingTargets(boardId, nodeId);
@@ -129,23 +160,31 @@ export class PtyHub {
         "You have no outgoing connected agents: carry the task through to completion yourself.\n"
       );
     }
-    const lines = targets.map((t) => `- ${t.id} — ${t.label}`).join("\n");
+    const handles = this.handles(boardId);
+    const lines = targets.map((t) => `- ${handles.get(t.id)} — ${t.label}`).join("\n");
     return (
       "\n\n## Orchestration — you are one link in a pipeline of agents\n" +
-      "CORE RULE: do ONLY your part of the work. Do NOT do the work of downstream " +
-      "agents: when your part is ready, DELEGATE the next step to the right connected agent. " +
-      "Do not respond as if you were the only executor.\n\n" +
-      "Agents you can hand work off to (outgoing):\n" +
+      "CORE RULE: this runs as a pipeline — do your part, then hand the next step to the " +
+      "connected agent that owns it. Absorbing the whole job yourself defeats the point of the pipeline.\n" +
+      "- When your part is done and a downstream agent owns the next step, hand off to it. " +
+      "This is the expected default — don't silently take over their work.\n" +
+      "- Ending is allowed: if your part finishes the task and nothing is left for a downstream " +
+      "agent (e.g. a final review you approve), just don't write a hand-off block.\n" +
+      "- You *may* do some of another agent's work yourself if it is genuinely warranted, but " +
+      "that is the exception, not the default — prefer delegating the next step.\n\n" +
+      "Agents you can hand work off to (outgoing) — use the handle on the left as the recipient:\n" +
       lines +
-      "\n\nTo delegate, end your message with a hand-off block in EXACTLY this " +
+      "\n\nIf the same role appears more than once (e.g. developer-1, developer-2) pick the " +
+      "specific handle you want; they are separate agents working in parallel.\n\n" +
+      "To delegate, end your message with a hand-off block in EXACTLY this " +
       "format (no backticks, no text after @@END):\n\n" +
-      "@@HANDOFF:<recipient-node-id>\n" +
+      "@@HANDOFF:<recipient-handle>\n" +
       "<complete, self-contained instructions: what you produced, files touched, what they must do>\n" +
       "@@END\n\n" +
-      "Example: an architect designs and then hands off to the developer with @@HANDOFF; the developer " +
-      "implements and hands off to the auditor; the auditor reviews and closes. The system delivers the task " +
-      "automatically into the recipient's terminal. If the work is truly finished and there is no " +
-      "next step, do not write the block.\n"
+      "Example: an architect produces the plan/spec and hands it to the developer — it does NOT " +
+      "implement; the developer implements and hands off to QA/the auditor; the auditor reviews and, " +
+      "if everything is fine, closes the chain WITHOUT handing off further. The system delivers each " +
+      "hand-off automatically into the recipient's terminal.\n"
     );
   }
 
@@ -258,9 +297,50 @@ export class PtyHub {
   }
 
   /**
-   * Deliver a task from one node to a connected one (call_agent). Validates the
-   * edge, ensures the target terminal is running, and types the task into it.
-   * Returns immediately; injection happens once the target's pi is ready.
+   * Resolve the recipient an agent asked for to one of its outgoing neighbours.
+   * Forgiving on purpose: a model rarely echoes a long UUID node-id verbatim, so
+   * we also accept the agent's name/label (case-insensitive, partial), and fall
+   * back to the sole outgoing target when there is no ambiguity. Direction is
+   * still enforced — only outgoing edges are considered.
+   */
+  private resolveOutgoingTarget(
+    boardId: string,
+    fromNodeId: string,
+    requested: string,
+  ): WorkflowNode | undefined {
+    const targets = this.outgoingTargets(boardId, fromNodeId);
+    if (targets.length === 0) return undefined;
+    const handles = this.handles(boardId);
+    const want = requested.trim().toLowerCase().replace(/^["']|["']$/g, "");
+    if (want) {
+      // Unique handle (developer-1) — the canonical recipient id.
+      const byHandle = targets.find((t) => handles.get(t.id)?.toLowerCase() === want);
+      if (byHandle) return byHandle;
+      // Raw UUID node-id, still accepted.
+      const byId = targets.find((t) => t.id.toLowerCase() === want);
+      if (byId) return byId;
+      // Bare label/partial — only when it resolves to exactly one node, so a
+      // parallelised role ("developer" with two nodes) is never picked at random.
+      const exact = targets.filter((t) => t.label.toLowerCase() === want);
+      if (exact.length === 1) return exact[0];
+      const partial = targets.filter(
+        (t) =>
+          t.label.toLowerCase().includes(want) || want.includes(t.label.toLowerCase()),
+      );
+      if (partial.length === 1) return partial[0];
+    }
+    // Only one place this agent can hand off to → the choice is unambiguous.
+    if (targets.length === 1) return targets[0];
+    return undefined;
+  }
+
+  /**
+   * Deliver a task from one node to a connected one (call_agent). Resolves the
+   * requested recipient against the sender's outgoing neighbours (by id OR name),
+   * ensures the target terminal is running, and types the task into it. On
+   * failure it tells the sender how to address its agents so the hand-off never
+   * fails silently. Returns immediately; injection happens once the target's pi
+   * is ready.
    */
   deliverCall(
     boardId: string,
@@ -268,16 +348,27 @@ export class PtyHub {
     targetNodeId: string,
     message: string,
   ): { ok: boolean; message?: string; error?: string } {
-    if (!this.hasEdge(boardId, fromNodeId, targetNodeId)) {
-      return {
-        ok: false,
-        error: `No edge ${fromNodeId} → ${targetNodeId}. Connect the two nodes on the canvas.`,
-      };
+    const target = this.resolveOutgoingTarget(boardId, fromNodeId, targetNodeId);
+    if (!target) {
+      const options = this.outgoingTargets(boardId, fromNodeId);
+      const handles = this.handles(boardId);
+      const list = options.length
+        ? options.map((t) => `${handles.get(t.id)} (${t.label})`).join(", ")
+        : "(none — you have no outgoing connected agents)";
+      const error = `Could not hand off to "${targetNodeId}". You can only delegate to: ${list}.`;
+      // Nudge the sender so it retries with a valid recipient instead of silently
+      // doing the downstream work itself.
+      if (options.length) {
+        this.injectTask(
+          boardId,
+          fromNodeId,
+          `[orchestra] ${error} Re-issue the @@HANDOFF block using one of those names.`,
+        );
+      }
+      return { ok: false, error };
     }
-    const target = this.graphs.get(boardId)?.nodes.get(targetNodeId);
-    if (!target) return { ok: false, error: `Recipient node not found: ${targetNodeId}` };
 
-    this.scheduleInject(boardId, targetNodeId, message);
+    this.scheduleInject(boardId, target.id, message);
 
     return {
       ok: true,
