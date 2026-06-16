@@ -133,7 +133,7 @@ function CardItem({
         <textarea
           value={desc}
           onChange={(e) => setDesc(e.target.value)}
-          placeholder="Descrizione…"
+          placeholder="Description…"
           rows={2}
           className="w-full resize-none rounded-md bg-zinc-950/80 border border-white/10 px-2 py-1 text-xs text-zinc-300 focus:border-zinc-500/70 focus:outline-none"
         />

@@ -39,7 +39,8 @@ export function useOrchestraWs(activeBoardId: string) {
         }
       };
 
-      ws.onerror = () => {
+      ws.onerror = (ev) => {
+        console.error("pinodes-orchestra: WebSocket error", ev);
         // onclose will handle reconnect
       };
 
@@ -58,7 +59,12 @@ export function useOrchestraWs(activeBoardId: string) {
             setConnected(true);
             break;
           case "node_status":
-            setNodeStatus(boardId, msg.nodeId as string, msg.status as never);
+            const rawStatus = msg.status as string;
+            const validStatus =
+              rawStatus === "idle" || rawStatus === "running" || rawStatus === "done" || rawStatus === "error"
+                ? rawStatus
+                : "idle";
+            setNodeStatus(boardId, msg.nodeId as string, validStatus);
             if (msg.status === "error" && msg.message) {
               setNodeError(boardId, msg.nodeId as string, msg.message as string);
               appendChat(boardId, {

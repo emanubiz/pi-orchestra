@@ -148,5 +148,15 @@ try {
   // frontend not built yet
 }
 
-await app.listen({ port: PORT, host: "0.0.0.0" });
+try {
+  await app.listen({ port: PORT, host: "0.0.0.0" });
+} catch (err) {
+  console.error(
+    `pinodes-orchestra: failed to start on port ${PORT} — ${err instanceof Error ? err.message : String(err)}`,
+  );
+  console.error(
+    "Is another process using the port? Try: lsof -i :" + PORT + " or set PORT=… in env.",
+  );
+  process.exit(1);
+}
 console.log(`pinodes-orchestra backend http://localhost:${PORT}`);

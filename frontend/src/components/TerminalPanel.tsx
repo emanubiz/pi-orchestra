@@ -6,21 +6,13 @@ import "@xterm/xterm/css/xterm.css";
 import { useRuntimeStore } from "../stores/runtimeStore";
 import { onPtyExit, onPtyOutput } from "../lib/ptyBus";
 import { fitWhenReady } from "../lib/termFit";
+import { TERM_FONT, TERM_THEME } from "../lib/termTheme";
 
 interface TerminalPanelProps {
   boardId: string;
   send: (msg: Record<string, unknown>) => void;
 }
 
-const THEME = {
-  background: "#09090b",
-  foreground: "#e4e4e7",
-  cursor: "#a78bfa",
-  cursorAccent: "#09090b",
-  selectionBackground: "rgba(139,92,246,0.35)",
-  black: "#18181b",
-  brightBlack: "#52525b",
-};
 
 export function TerminalPanel({ boardId, send }: TerminalPanelProps) {
   const selectedNodeId = useRuntimeStore((s) => s.selectedNodeId);
@@ -38,8 +30,8 @@ export function TerminalPanel({ boardId, send }: TerminalPanelProps) {
       convertEol: false,
       fontSize: 12.5,
       lineHeight: 1.15,
-      fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-      theme: THEME,
+      fontFamily: TERM_FONT,
+      theme: TERM_THEME,
       cursorBlink: true,
       scrollback: 5000,
       allowProposedApi: true,

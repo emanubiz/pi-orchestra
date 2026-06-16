@@ -12,7 +12,9 @@ if (IS_EMBEDDED) {
     void navigator.serviceWorker
       .getRegistrations()
       .then((regs) => Promise.all(regs.map((r) => r.unregister())))
-      .catch(() => {});
+      .catch((err) => {
+        console.error("pinodes-orchestra: service worker teardown failed", err);
+      });
   }
   if (typeof caches !== "undefined") {
     void caches.keys().then((keys) => keys.forEach((k) => void caches.delete(k)));

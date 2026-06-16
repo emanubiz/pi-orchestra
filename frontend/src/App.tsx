@@ -62,7 +62,8 @@ export function App() {
       .then((data: { defaultCwd?: string }) => {
         if (data.defaultCwd) setDefaultCwd(data.defaultCwd);
       })
-      .catch(() => {
+      .catch((err) => {
+        console.error("pinodes-orchestra: /api/info unreachable", err);
         /* backend offline — BoardTabs will use "." */
       });
   }, [setDefaultCwd, bindWorkspace]);

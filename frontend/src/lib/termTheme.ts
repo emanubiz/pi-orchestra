@@ -28,6 +28,6 @@ export const TerminalContext = createContext<TerminalBridge | null>(null);
 
 export function useTerminalBridge(): TerminalBridge {
   const ctx = useContext(TerminalContext);
-  if (!ctx) throw new Error("TerminalContext non disponibile");
+  if (!ctx) throw new Error("TerminalContext not available");
   return ctx;
 }

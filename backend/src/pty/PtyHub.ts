@@ -69,7 +69,7 @@ export class PtyHub {
   private broadcast: BroadcastFn = () => {};
   private graphs = new Map<string, BoardGraph>();
   private sessions = new Map<string, Session>();
-  private pending = new Map<string, { cols: number; rows: number }>();
+  private pending = new Map<string, { cols: number; rows: number; message?: string }>();
   private kanbanBoards = new Set<string>();
   private cmd = resolvePiCommand();
   private events = new EventEmitter();
@@ -112,11 +112,16 @@ export class PtyHub {
       if (b === boardId && !nodes.has(nodeId)) this.kill(boardId, nodeId);
     }
     // Spawn terminals that were requested before this board's graph arrived.
+    // If a task was queued while the node was pending (e.g. injectTask before
+    // the graph sync), schedule its injection once pi has booted.
     for (const [k, size] of [...this.pending]) {
       const [b, nodeId] = k.split(":");
       if (b === boardId && nodes.has(nodeId)) {
         this.pending.delete(k);
         this.spawn(boardId, nodeId, size.cols, size.rows);
+        if (size.message) {
+          this.scheduleInject(boardId, nodeId, size.message);
+        }
       }
     }
   }
@@ -440,11 +445,21 @@ export class PtyHub {
   /** Ensure the node is running, then inject once its pi has had time to boot. */
   private scheduleInject(boardId: string, nodeId: string, message: string): void {
     this.ensure(boardId, nodeId, 80, 24);
-    const s = this.sessions.get(key(boardId, nodeId));
-    const age = s ? Date.now() - s.startedAt : 0;
-    // A freshly spawned pi needs ~3s to boot before it accepts input.
-    const delay = Math.max(150, 3000 - age);
-    setTimeout(() => this.inject(boardId, nodeId, message), delay);
+    const k = key(boardId, nodeId);
+    const s = this.sessions.get(k);
+    if (s) {
+      // Session exists — inject after the remaining boot delay.
+      const age = Date.now() - s.startedAt;
+      const delay = Math.max(150, 3000 - age);
+      setTimeout(() => this.inject(boardId, nodeId, message), delay);
+      return;
+    }
+    // Session was deferred (graph not synced yet) — store the message so it is
+    // injected when setGraph spawns the terminal (see the pending loop there).
+    const pending = this.pending.get(k);
+    if (pending) {
+      pending.message = message;
+    }
   }
 
   /** Type text into a node's pi editor as a bracketed paste, then submit. */
@@ -463,8 +478,9 @@ export class PtyHub {
     s.rows = rows;
     try {
       s.pty.resize(cols, rows);
-    } catch {
+    } catch (err) {
       // terminal may have just exited
+      console.error(`pinodes-orchestra: pty resize failed for ${boardId}:${nodeId}`, err);
     }
     // Keep read-only mirrors in sync with the new PTY dimensions.
     this.broadcast({ type: "pty_size", boardId, nodeId, cols, rows });
@@ -489,8 +505,9 @@ export class PtyHub {
     this.sessions.delete(k);
     try {
       s.pty.kill();
-    } catch {
+    } catch (err) {
       // already gone
+      console.error(`pinodes-orchestra: pty kill failed for ${boardId}:${nodeId}`, err);
     }
   }
 
@@ -500,6 +517,10 @@ export class PtyHub {
         const [, nodeId] = k.split(":");
         this.kill(boardId, nodeId);
       }
+    }
+    // Clean up deferred spawns that will never happen.
+    for (const k of [...this.pending.keys()]) {
+      if (k.startsWith(`${boardId}:`)) this.pending.delete(k);
     }
   }
 
