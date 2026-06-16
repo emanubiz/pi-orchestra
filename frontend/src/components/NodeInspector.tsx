@@ -114,7 +114,7 @@ export function NodeInspector({
         <input
           value={runPromptDraft}
           onChange={(e) => setRunPromptDraft(e.target.value)}
-          placeholder="Messaggio avvio flow…"
+          placeholder="Flow start message…"
           className="flex-1 rounded-lg border border-white/10 bg-zinc-950/80 px-2.5 py-1.5 text-xs transition-colors focus:border-violet-500/60 focus:outline-none"
         />
         <button

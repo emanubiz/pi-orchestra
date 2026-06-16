@@ -86,7 +86,7 @@ export function NodeTerminal({ nodeId }: { nodeId: string }) {
       <div ref={hostRef} className="h-full w-full" style={{ pointerEvents: "none" }} />
       {!live && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[10px] text-zinc-600">
-          avvio pi...
+          starting pi…
         </div>
       )}
     </div>

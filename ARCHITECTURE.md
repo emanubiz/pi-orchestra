@@ -202,7 +202,7 @@ When **embedded in a host** (VS Code) the iframe URL carries `?embed=vscode&cwd=
 
 | View | Purpose |
 |------|---------|
-| **Agenti** | Flow canvas + terminals + inspector |
+| **Agents** | Flow canvas + terminals + inspector |
 | **Kanban** | Task cards that launch boards at entry node |
 
 ## Runtime types (current + planned)
