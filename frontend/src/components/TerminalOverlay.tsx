@@ -6,6 +6,7 @@ import "@xterm/xterm/css/xterm.css";
 import { onPtyExit, onPtyOutput } from "../lib/ptyBus";
 import { TERM_FONT, TERM_THEME } from "../lib/termTheme";
 import { fitWhenReady } from "../lib/termFit";
+import { attachClipboard } from "../lib/termClipboard";
 
 interface TerminalOverlayProps {
   boardId: string;
@@ -46,6 +47,7 @@ export function TerminalOverlay({ boardId, nodeId, label, send, onClose }: Termi
       term.write("\r\n\x1b[2m- pi session ended - use Restart -\x1b[0m\r\n");
     });
     const onData = term.onData((data) => send({ type: "pty_input", nodeId, data }));
+    const detachClipboard = attachClipboard(term, host);
 
     // Attach immediately with a safe default size; resize once the overlay is
     // laid out so the PTY is never at 1 column.
@@ -64,6 +66,7 @@ export function TerminalOverlay({ boardId, nodeId, label, send, onClose }: Termi
 
     return () => {
       window.removeEventListener("keydown", onKey);
+      detachClipboard();
       unsubscribeFit();
       onData.dispose();
       unsubOut();

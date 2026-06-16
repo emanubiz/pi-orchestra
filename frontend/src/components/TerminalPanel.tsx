@@ -7,6 +7,7 @@ import { useRuntimeStore } from "../stores/runtimeStore";
 import { onPtyExit, onPtyOutput } from "../lib/ptyBus";
 import { fitWhenReady } from "../lib/termFit";
 import { TERM_FONT, TERM_THEME } from "../lib/termTheme";
+import { attachClipboard } from "../lib/termClipboard";
 
 interface TerminalPanelProps {
   boardId: string;
@@ -50,6 +51,7 @@ export function TerminalPanel({ boardId, send }: TerminalPanelProps) {
     });
 
     const onData = term.onData((data) => send({ type: "pty_input", nodeId: selectedNodeId, data }));
+    const detachClipboard = attachClipboard(term, host);
 
     // Attach immediately with a safe default size so the backend PTY is never
     // spawned at 1 column while the sidebar is still being laid out.
@@ -67,6 +69,7 @@ export function TerminalPanel({ boardId, send }: TerminalPanelProps) {
     term.focus();
 
     return () => {
+      detachClipboard();
       unsubscribeFit();
       onData.dispose();
       unsubOut();
