@@ -6,6 +6,11 @@
   "private": true,
   "publisher": "emanubiz",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/emanubiz/pinodes-orchestra.git",
+    "directory": "vscode-extension"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
