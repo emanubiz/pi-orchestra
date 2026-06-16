@@ -70,6 +70,10 @@ export class PtyHub {
   private graphs = new Map<string, BoardGraph>();
   private sessions = new Map<string, Session>();
   private pending = new Map<string, { cols: number; rows: number; message?: string }>();
+  // Last set of outgoing connections a running node was told about, so a live
+  // graph edit (wiring an edge after the terminal already booted) re-syncs the
+  // agent — its system prompt is fixed at spawn and can't learn it otherwise.
+  private connectionSig = new Map<string, string>();
   private kanbanBoards = new Set<string>();
   private cmd = resolvePiCommand();
   private events = new EventEmitter();
@@ -124,6 +128,30 @@ export class PtyHub {
         }
       }
     }
+    // Live connection sync: the system prompt's hand-off instructions are baked
+    // in at spawn, so a node wired up (or unwired) while its pi is already
+    // running would never learn it can now hand off. Diff each running node's
+    // outgoing set against what it was last told and notify on a real change.
+    // Mirrors the finality toggle above; deduped so it never fires on no-op
+    // graph syncs (e.g. a node drag re-sending the same graph).
+    for (const k of [...this.sessions.keys()]) {
+      const [b, nodeId] = k.split(":");
+      if (b !== boardId) continue;
+      const sig = this.outgoingSignature(boardId, nodeId);
+      if (this.connectionSig.get(k) === sig) continue;
+      const knew = this.connectionSig.has(k);
+      this.connectionSig.set(k, sig);
+      if (knew) this.notifyConnectionsChange(boardId, nodeId);
+    }
+  }
+
+  /** Stable fingerprint of a node's outgoing connections (handle + label). */
+  private outgoingSignature(boardId: string, nodeId: string): string {
+    const handles = this.handles(boardId);
+    return this.outgoingTargets(boardId, nodeId)
+      .map((t) => `${handles.get(t.id)}:${t.label}`)
+      .sort()
+      .join("|");
   }
 
   /** Nodes this node can hand off to: the targets of its outgoing edges. */
@@ -315,6 +343,9 @@ export class PtyHub {
     const session: Session = { pty: term, buffer: "", cols, rows, startedAt: Date.now() };
     const k = key(boardId, nodeId);
     this.sessions.set(k, session);
+    // Baseline for live connection sync: the spawn-time system prompt already
+    // reflects these, so a later setGraph only notifies if this changes.
+    this.connectionSig.set(k, this.outgoingSignature(boardId, nodeId));
     this.broadcast({ type: "node_status", boardId, nodeId, status: "running" });
     // Tell read-only mirrors the PTY's real size so they can render pi's
     // absolute-cursor output faithfully (and scale it down) instead of fitting
@@ -328,7 +359,10 @@ export class PtyHub {
 
     term.onExit(({ exitCode }) => {
       // Only clear if this exact session is still the active one (guards restart).
-      if (this.sessions.get(k) === session) this.sessions.delete(k);
+      if (this.sessions.get(k) === session) {
+        this.sessions.delete(k);
+        this.connectionSig.delete(k);
+      }
       this.broadcast({ type: "pty_exit", boardId, nodeId, code: exitCode });
       this.broadcast({ type: "node_status", boardId, nodeId, status: "idle" });
       this.events.emit(`exit:${boardId}:${nodeId}`, exitCode ?? null);
@@ -442,6 +476,40 @@ export class PtyHub {
     this.inject(boardId, nodeId, message);
   }
 
+  /**
+   * Tell an already-running node that its outgoing connections changed (an edge
+   * was wired or removed on the canvas after it booted). Gives it the current
+   * recipient list and the @@HANDOFF format, since the system prompt — fixed at
+   * spawn — cannot be amended on a live pi.
+   */
+  private notifyConnectionsChange(boardId: string, nodeId: string): void {
+    if (!this.sessions.has(key(boardId, nodeId))) return;
+    const targets = this.outgoingTargets(boardId, nodeId);
+    if (targets.length === 0) {
+      this.inject(
+        boardId,
+        nodeId,
+        "[orchestra] Connection update: you no longer have any outgoing connected agents. " +
+          "Carry the task through to completion yourself — do not write a @@HANDOFF block.",
+      );
+      return;
+    }
+    const handles = this.handles(boardId);
+    const lines = targets.map((t) => `- ${handles.get(t.id)} — ${t.label}`).join("\n");
+    this.inject(
+      boardId,
+      nodeId,
+      "[orchestra] Connection update: you can now hand work off to the agents below. When your " +
+        "part is done, delegate the next step by ending your message with a hand-off block in " +
+        "EXACTLY this format (no backticks, no text after @@END):\n\n" +
+        "@@HANDOFF:<recipient-handle>\n" +
+        "<complete, self-contained instructions: what you produced, files touched, what they must do>\n" +
+        "@@END\n\n" +
+        "Agents you can hand off to (use the handle on the left):\n" +
+        lines,
+    );
+  }
+
   /** Ensure the node is running, then inject once its pi has had time to boot. */
   private scheduleInject(boardId: string, nodeId: string, message: string): void {
     this.ensure(boardId, nodeId, 80, 24);
@@ -503,6 +571,7 @@ export class PtyHub {
     const s = this.sessions.get(k);
     if (!s) return;
     this.sessions.delete(k);
+    this.connectionSig.delete(k);
     try {
       s.pty.kill();
     } catch (err) {
