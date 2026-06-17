@@ -12,11 +12,14 @@ interface RuntimeState {
   chatByNode: Record<string, ChatLine[]>;
   streamBuffer: Record<string, string>;
   nodeError: Record<string, string>;
+  /** `boardId:nodeId` → determinism watchdog enabled (default true when absent). */
+  enforcement: Record<string, boolean>;
   selectedNodeId: string | null;
   prompts: SystemPrompt[];
   runPromptDraft: string;
 
   setConnected: (v: boolean) => void;
+  setEnforcement: (boardId: string, nodeId: string, enabled: boolean) => void;
   setActiveBoardId: (boardId: string) => void;
   setSelectedNodeId: (id: string | null) => void;
   setPrompts: (p: SystemPrompt[]) => void;
@@ -37,11 +40,14 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
   chatByNode: {},
   streamBuffer: {},
   nodeError: {},
+  enforcement: {},
   selectedNodeId: null,
   prompts: [],
   runPromptDraft: "",
 
   setConnected: (v) => set({ connected: v }),
+  setEnforcement: (boardId, nodeId, enabled) =>
+    set((s) => ({ enforcement: { ...s.enforcement, [nodeKey(boardId, nodeId)]: enabled } })),
   setActiveBoardId: (boardId) => set({ activeBoardId: boardId, selectedNodeId: null }),
   setSelectedNodeId: (id) => set({ selectedNodeId: id }),
   setPrompts: (p) => set({ prompts: p }),
@@ -110,6 +116,7 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
       const chatByNode = { ...s.chatByNode };
       const streamBuffer = { ...s.streamBuffer };
       const nodeError = { ...s.nodeError };
+      const enforcement = { ...s.enforcement };
       for (const k of Object.keys(nodeStatus)) {
         if (k.startsWith(prefix)) delete nodeStatus[k];
       }
@@ -122,7 +129,10 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
       for (const k of Object.keys(nodeError)) {
         if (k.startsWith(prefix)) delete nodeError[k];
       }
-      return { nodeStatus, chatByNode, streamBuffer, nodeError };
+      for (const k of Object.keys(enforcement)) {
+        if (k.startsWith(prefix)) delete enforcement[k];
+      }
+      return { nodeStatus, chatByNode, streamBuffer, nodeError, enforcement };
     }),
 }));
 

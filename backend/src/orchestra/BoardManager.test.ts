@@ -381,3 +381,92 @@ describe("BoardManager granular CRUD", () => {
     expect(manager.deleteEdge("nope", "e1")).toBe(false);
   });
 });
+
+describe("BoardManager graph validation (determinism F5)", () => {
+  beforeEach(() => {
+    mockBoards.clear();
+  });
+
+  function seed(graph: WorkflowGraph) {
+    const ptyHub = makeFakePtyHub();
+    const manager = new BoardManager(ptyHub);
+    const board = manager.create("/tmp");
+    manager.setGraph(board.boardId, structuredClone(graph));
+    return { ptyHub, manager, boardId: board.boardId };
+  }
+
+  const nonFinalLinked: WorkflowGraph = {
+    name: "flow",
+    cwd: "/tmp",
+    entryNodeId: "n1",
+    nodes: [
+      { id: "n1", label: "Architect", promptId: "p1", canBeFinal: false, position: { x: 0, y: 0 } },
+      { id: "n2", label: "Developer", promptId: "p2", position: { x: 1, y: 0 } },
+    ],
+    edges: [{ id: "e1", sourceNodeId: "n1", targetNodeId: "n2" }],
+  };
+
+  it("accepts a non-final node that has an outgoing edge", () => {
+    expect(() => seed(nonFinalLinked)).not.toThrow();
+  });
+
+  it("accepts a final-capable node with no outgoing edge", () => {
+    expect(() =>
+      seed({
+        ...nonFinalLinked,
+        nodes: [{ id: "n1", label: "Solo", promptId: "p1", canBeFinal: true, position: { x: 0, y: 0 } }],
+        edges: [],
+      }),
+    ).not.toThrow();
+  });
+
+  it("rejects a non-final node with no outgoing edge", () => {
+    const manager = new BoardManager(makeFakePtyHub());
+    const board = manager.create("/tmp");
+    expect(() =>
+      manager.setGraph(board.boardId, {
+        ...nonFinalLinked,
+        nodes: [{ id: "n1", label: "Stuck", promptId: "p1", canBeFinal: false, position: { x: 0, y: 0 } }],
+        edges: [],
+      }),
+    ).toThrow(/non-final.*no\s+\n?\s*outgoing edges|can neither end the chain/);
+  });
+
+  it("addNode rejects a non-final node with no outgoing edge", () => {
+    const { manager, boardId } = seed(nonFinalLinked);
+    expect(() =>
+      manager.addNode(boardId, {
+        label: "Orphan",
+        promptId: "p3",
+        canBeFinal: false,
+        position: { x: 5, y: 5 },
+      }),
+    ).toThrow(/can neither end the chain/);
+    // Rejection must not leave the node half-added in memory.
+    expect(manager.getGraph(boardId)?.nodes).toHaveLength(2);
+  });
+
+  it("updateNode rejects flipping a node with no outgoing edge to non-final", () => {
+    const { manager, boardId } = seed(nonFinalLinked);
+    // n2 has no outgoing edge; making it non-final is contradictory.
+    expect(() => manager.updateNode(boardId, "n2", { canBeFinal: false })).toThrow(
+      /can neither end the chain/,
+    );
+    // The live graph must be untouched after the throw.
+    expect(manager.getGraph(boardId)?.nodes.find((n) => n.id === "n2")?.canBeFinal).toBeUndefined();
+  });
+
+  it("deleteEdge rejects removing the last outgoing edge of a non-final node", () => {
+    const { manager, boardId } = seed(nonFinalLinked);
+    expect(() => manager.deleteEdge(boardId, "e1")).toThrow(/can neither end the chain/);
+    // The edge must still be present after the rejected delete.
+    expect(manager.getGraph(boardId)?.edges).toHaveLength(1);
+  });
+
+  it("deleteNode rejects orphaning a non-final node's only downstream", () => {
+    const { manager, boardId } = seed(nonFinalLinked);
+    // Deleting n2 would leave non-final n1 with no outgoing edge.
+    expect(() => manager.deleteNode(boardId, "n2")).toThrow(/can neither end the chain/);
+    expect(manager.getGraph(boardId)?.nodes).toHaveLength(2);
+  });
+});

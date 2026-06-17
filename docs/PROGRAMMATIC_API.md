@@ -96,10 +96,25 @@ POST /api/validate-path    { path }
 
 ### Internal (pi extension callbacks)
 
+These are called by `backend/pi-extensions/call-agent.ts` running inside each
+node's pi terminal. Localhost-only, same (no-auth) precedent as the existing
+internal routes.
+
 ```http
-POST /internal/call-agent   { boardId, fromNodeId, targetNodeId, message }
-POST /internal/card-status  { boardId, column }
+POST /internal/call-agent      { boardId, fromNodeId, targetNodeId, message }
+POST /internal/card-status     { boardId, column }
+GET  /internal/orchestra-context?boardId=&nodeId=
+  → { boardId, nodeId, appendix, canBeFinal, outgoing: [{ id, handle, label }], kanban, enforce }
+  → 404 if the board/node is unknown (extension degrades to its baked fallback appendix)
+  # `enforce` is the per-node determinism-watchdog flag (false → free-chat mode)
+POST /internal/ready           { boardId, nodeId }              # session_start → flush queued injects
+POST /internal/handoff-failed  { boardId, nodeId, reason, recipients? }  # watchdog gave up → node card error
 ```
+
+`GET /internal/orchestra-context` is fetched by the extension's
+`before_agent_start` each turn to refresh the orchestration appendix
+(recipients, finality rule, Kanban) without typing into the PTY, and is the
+determinism watchdog's source of truth for valid handoff targets.
 
 ---
 
@@ -133,6 +148,11 @@ GET /api/v1/orchestra/boards/:boardId/graph
 ```
 
 Equivalent WebSocket command: `{ type: "load_graph", graph, cwd }`.
+
+> **Validation (400).** Every graph-edit path (this `PUT`, plus the granular
+> node/edge endpoints) is rejected with `400` if a node is `canBeFinal: false`
+> and has **no outgoing edge** — it could neither end the chain nor hand off.
+> Connect it downstream first, or set `canBeFinal: true`.
 
 ### Execution
 
