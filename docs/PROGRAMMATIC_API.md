@@ -2,7 +2,7 @@
 
 REST and CLI surface for **host integrations** — Hermes Desktop tab, OpenClaw plugin, VSCode/Cursor extension, CI pipelines.
 
-> **Status:** P0 orchestration endpoints are implemented and stable. The CLI wrapper, granular node/edge editing, and multi-runtime node support are planned next.
+> **Status:** P0 and P2 orchestration endpoints are implemented and stable. This includes the CLI wrapper and granular node/edge editing.
 
 ## Design goals
 
@@ -74,6 +74,13 @@ GET  /api/v1/orchestra/boards/:boardId/status
 POST /api/v1/orchestra/boards/:boardId/nodes/:nodeId/stop
 POST /api/v1/orchestra/boards/:boardId/nodes/:nodeId/inject   { message: string }
 POST /api/v1/orchestra/boards/:boardId/nodes/:nodeId/input    { data: string }
+
+POST /api/v1/orchestra/boards/:boardId/nodes              { label, promptId, position, id?, promptOverride?, canBeFinal? }
+PATCH /api/v1/orchestra/boards/:boardId/nodes/:nodeId     { label?, promptId?, promptOverride?, canBeFinal?, position? }
+DELETE /api/v1/orchestra/boards/:boardId/nodes/:nodeId
+
+POST /api/v1/orchestra/boards/:boardId/edges              { sourceNodeId, targetNodeId, id? }
+DELETE /api/v1/orchestra/boards/:boardId/edges/:edgeId
 
 POST /api/v1/orchestra/flows                   { name, cwd, graph, message, wait?, waitTimeoutMs? }
 ```
@@ -192,6 +199,12 @@ Body: {
 }
 ```
 
+> **Note:** When `wait: true` and the flow completes (`timedOut: false`), the temporary
+> board is automatically deleted to avoid leaking resources. The `boardId` in the
+> response is provided for reference but subsequent requests to it will return 404.
+> If the flow times out (`timedOut: true`) the board is kept so you can inspect
+> or interact with it via the CLI or UI.
+
 Example:
 
 ```bash
@@ -239,16 +252,25 @@ Missing or invalid tokens receive `401 Unauthorized`.
 
 ---
 
-## Planned — CLI
+## CLI Wrapper (Implemented)
 
-```bash
-pinodes-orchestra run --cwd ./my-repo --workflow <id> --message "Implement feature X"
-pinodes-orchestra run --graph flow.json --entry <nodeId> --message "..."
-pinodes-orchestra status --board <boardId>
-pinodes-orchestra stop --board <boardId>
-```
+The `pinodes-orchestra` CLI wraps the REST API for scripting and CI.
 
-Wraps the REST API above. Useful for OpenClaw cron, Hermes scripts, CI.
+**Installation & Setup**
+Run via npm: `npm run cli -- <command>`
+Env vars: `PINODES_ORCHESTRA_URL` (default `http://localhost:3847`), `PINODES_ORCHESTRA_TOKEN`.
+
+**Available Commands:**
+- `board create <cwd> [label]` | `board list` | `board delete <id>` | `board status <id>` | `board graph <id> [file.json]`
+- `node add <boardId> <label> <promptId> [--x X] [--y Y] [--override O] [--canBeFinal bool]`
+- `node update <boardId> <nodeId> [--label L] [--promptId P] [--override O] [--canBeFinal bool] [--x X] [--y Y]`
+- `node delete <boardId> <nodeId>`
+- `edge add <boardId> <srcId> <tgtId>` | `edge delete <boardId> <edgeId>`
+- `run <boardId> <message> [--nodeId NID]`
+- `inject <boardId> <nodeId> <message>`
+- `stop <boardId>`
+- `flow <name> <cwd> <graph.json> <message> [--wait] [--timeout MS]`
+
 
 ---
 
@@ -329,5 +351,5 @@ interface WorkflowNode {
 | Node stop / inject / input | P0 | ✅ Implemented |
 | Auth token | P0 | ✅ Implemented |
 | `POST /flows` | P1 | ✅ Implemented |
-| CLI wrapper | P2 | 🔜 Planned |
-| Granular node/edge CRUD | P2 | 🔜 Planned |
+| CLI wrapper | P2 | ✅ Implemented |
+| Granular node/edge CRUD | P2 | ✅ Implemented |
