@@ -8,7 +8,7 @@ import {
   saveBoardGraph as dbSaveBoardGraph,
 } from "../db/index.js";
 import type { PtyHub } from "../pty/PtyHub.js";
-import type { BoardState, WorkflowGraph } from "../types.js";
+import type { BoardState, WorkflowEdge, WorkflowGraph, WorkflowNode } from "../types.js";
 
 export interface BoardListItem {
   boardId: string;
@@ -166,5 +166,115 @@ export class BoardManager {
     timeoutMs?: number,
   ): Promise<{ code: number | null; timedOut: boolean }> {
     return this.ptyHub.waitForExit(boardId, nodeId, timeoutMs);
+  }
+
+  // ── Granular CRUD: nodes ──────────────────────────────────────────────────
+
+  addNode(
+    boardId: string,
+    node: Omit<WorkflowNode, "id"> & { id?: string },
+  ): WorkflowNode {
+    const board = this.boards.get(boardId);
+    if (!board) throw new Error(`Board not found: ${boardId}`);
+    if (!board.graph) throw new Error(`No graph loaded for board: ${boardId}`);
+
+    const nodeId = node.id ?? crypto.randomUUID();
+    const newNode: WorkflowNode = { ...node, id: nodeId };
+    board.graph.nodes.push(newNode);
+
+    // Persist via setGraph (saves to DB + re-syncs PtyHub)
+    this.setGraph(boardId, board.graph);
+    return newNode;
+  }
+
+  updateNode(
+    boardId: string,
+    nodeId: string,
+    patch: Partial<Omit<WorkflowNode, "id">>,
+  ): WorkflowNode {
+    const { board, graph, node } = this.getNode(boardId, nodeId);
+
+    if (patch.label !== undefined) node.label = patch.label;
+    if (patch.promptId !== undefined) node.promptId = patch.promptId;
+    if (patch.promptOverride !== undefined) node.promptOverride = patch.promptOverride;
+    if (patch.canBeFinal !== undefined) node.canBeFinal = patch.canBeFinal;
+    if (patch.position !== undefined) node.position = patch.position;
+
+    // Persist via setGraph (saves to DB + triggers live finality/connection sync)
+    this.setGraph(boardId, graph);
+
+    // Return the updated node from the freshly saved graph
+    const updated = this.boards.get(boardId)?.graph?.nodes.find((n) => n.id === nodeId);
+    if (!updated) throw new Error(`Node vanished after update: ${nodeId}`);
+    return updated;
+  }
+
+  deleteNode(boardId: string, nodeId: string): boolean {
+    const board = this.boards.get(boardId);
+    if (!board) throw new Error(`Board not found: ${boardId}`);
+    if (!board.graph) throw new Error(`No graph loaded for board: ${boardId}`);
+
+    const idx = board.graph.nodes.findIndex((n) => n.id === nodeId);
+    if (idx === -1) return false;
+
+    board.graph.nodes.splice(idx, 1);
+
+    // Also remove any edges referencing this node
+    board.graph.edges = board.graph.edges.filter(
+      (e) => e.sourceNodeId !== nodeId && e.targetNodeId !== nodeId,
+    );
+
+    // Clear entryNodeId if it was the deleted node
+    if (board.graph.entryNodeId === nodeId) {
+      board.graph.entryNodeId = null;
+    }
+
+    // Persist via setGraph — PtyHub auto-kills the node's PTY if running
+    this.setGraph(boardId, board.graph);
+    return true;
+  }
+
+  // ── Granular CRUD: edges ──────────────────────────────────────────────────
+
+  addEdge(
+    boardId: string,
+    edge: Omit<WorkflowEdge, "id"> & { id?: string },
+  ): WorkflowEdge {
+    const board = this.boards.get(boardId);
+    if (!board) throw new Error(`Board not found: ${boardId}`);
+    if (!board.graph) throw new Error(`No graph loaded for board: ${boardId}`);
+
+    const { sourceNodeId, targetNodeId } = edge;
+
+    if (sourceNodeId === targetNodeId) {
+      throw new Error("Self-loop edges are not allowed");
+    }
+
+    const nodeIds = new Set(board.graph.nodes.map((n) => n.id));
+    if (!nodeIds.has(sourceNodeId)) {
+      throw new Error(`Source node not found in graph: ${sourceNodeId}`);
+    }
+    if (!nodeIds.has(targetNodeId)) {
+      throw new Error(`Target node not found in graph: ${targetNodeId}`);
+    }
+
+    const edgeId = edge.id ?? crypto.randomUUID();
+    const newEdge: WorkflowEdge = { ...edge, id: edgeId };
+    board.graph.edges.push(newEdge);
+
+    this.setGraph(boardId, board.graph);
+    return newEdge;
+  }
+
+  deleteEdge(boardId: string, edgeId: string): boolean {
+    const board = this.boards.get(boardId);
+    if (!board || !board.graph) return false;
+
+    const idx = board.graph.edges.findIndex((e) => e.id === edgeId);
+    if (idx === -1) return false;
+
+    board.graph.edges.splice(idx, 1);
+    this.setGraph(boardId, board.graph);
+    return true;
   }
 }

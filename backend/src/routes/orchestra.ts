@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { BoardManager } from "../orchestra/BoardManager.js";
 import { ptyHub } from "../pty/PtyHub.js";
-import type { WorkflowGraph } from "../types.js";
+import type { WorkflowEdge, WorkflowGraph, WorkflowNode } from "../types.js";
 
 function checkAuth(req: { headers: Record<string, string | string[] | undefined> }, reply: {
   code: (code: number) => { send: (payload: unknown) => void };
@@ -179,6 +179,123 @@ export function createOrchestraRoutes(boardManager: BoardManager) {
       }
     });
 
+    // ── Granular CRUD: nodes ────────────────────────────────────────────────
+
+    app.post<{
+      Params: { boardId: string };
+      Body: {
+        id?: string;
+        label: string;
+        promptId: string;
+        promptOverride?: string | null;
+        canBeFinal?: boolean | null;
+        position: { x: number; y: number };
+      };
+    }>("/boards/:boardId/nodes", async (req, reply) => {
+      const { id, label, promptId, promptOverride, canBeFinal, position } = req.body;
+      if (!label || typeof label !== "string") {
+        return reply.code(400).send({ error: "label is required" });
+      }
+      if (!promptId || typeof promptId !== "string") {
+        return reply.code(400).send({ error: "promptId is required" });
+      }
+      if (!position || typeof position.x !== "number" || typeof position.y !== "number") {
+        return reply.code(400).send({ error: "position { x, y } is required" });
+      }
+      try {
+        const node = boardManager.addNode(req.params.boardId, {
+          id,
+          label,
+          promptId,
+          promptOverride: promptOverride ?? null,
+          canBeFinal: canBeFinal ?? null,
+          position,
+        });
+        return { ok: true, node };
+      } catch (err) {
+        return reply
+          .code(400)
+          .send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+
+    app.patch<{
+      Params: { boardId: string; nodeId: string };
+      Body: Partial<{
+        label: string;
+        promptId: string;
+        promptOverride: string | null;
+        canBeFinal: boolean;
+        position: { x: number; y: number };
+      }>;
+    }>("/boards/:boardId/nodes/:nodeId", async (req, reply) => {
+      try {
+        const node = boardManager.updateNode(
+          req.params.boardId,
+          req.params.nodeId,
+          req.body,
+        );
+        return { ok: true, node };
+      } catch (err) {
+        return reply
+          .code(err instanceof Error && err.message.startsWith("Node not found")
+            ? 404
+            : 400)
+          .send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+
+    app.delete<{ Params: { boardId: string; nodeId: string } }>(
+      "/boards/:boardId/nodes/:nodeId",
+      async (req, reply) => {
+        try {
+          const ok = boardManager.deleteNode(req.params.boardId, req.params.nodeId);
+          if (!ok) return reply.code(404).send({ error: "Node not found" });
+          return { ok: true };
+        } catch (err) {
+          return reply
+            .code(404)
+            .send({ error: err instanceof Error ? err.message : String(err) });
+        }
+      },
+    );
+
+    // ── Granular CRUD: edges ────────────────────────────────────────────────
+
+    app.post<{
+      Params: { boardId: string };
+      Body: { id?: string; sourceNodeId: string; targetNodeId: string };
+    }>("/boards/:boardId/edges", async (req, reply) => {
+      const { id, sourceNodeId, targetNodeId } = req.body;
+      if (!sourceNodeId || typeof sourceNodeId !== "string") {
+        return reply.code(400).send({ error: "sourceNodeId is required" });
+      }
+      if (!targetNodeId || typeof targetNodeId !== "string") {
+        return reply.code(400).send({ error: "targetNodeId is required" });
+      }
+      try {
+        const edge = boardManager.addEdge(req.params.boardId, {
+          id,
+          sourceNodeId,
+          targetNodeId,
+        });
+        return { ok: true, edge };
+      } catch (err) {
+        return reply
+          .code(400)
+          .send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+
+    app.delete<{ Params: { boardId: string; edgeId: string } }>(
+      "/boards/:boardId/edges/:edgeId",
+      async (req, reply) => {
+        const ok = boardManager.deleteEdge(req.params.boardId, req.params.edgeId);
+        if (!ok) return reply.code(404).send({ error: "Edge not found" });
+        return { ok: true };
+      },
+    );
+
     app.post<{
       Body: {
         name: string;
@@ -240,6 +357,14 @@ export function createOrchestraRoutes(boardManager: BoardManager) {
           nodeId,
           req.body.waitTimeoutMs ?? 120_000,
         );
+
+        // Flow completed → auto-cleanup the temporary board.
+        // On timeout the flow is still running and the caller may want to
+        // poll status or interact with the board (it outlives the request).
+        if (!result.timedOut) {
+          boardManager.delete(board.boardId);
+        }
+
         return {
           ok: true,
           boardId: board.boardId,

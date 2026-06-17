@@ -125,13 +125,46 @@ they prefer it. VS Code users can install from either registry.
 ## Automation
 
 A GitHub Actions workflow (`.github/workflows/publish-extension.yml`) automates
-the matrix build and publish:
+the matrix build and publish to **both** the VS Code Marketplace and Open VSX:
 
-- **Push a `v*` tag** (e.g. `v0.2.1`) → builds all four VSIX files and publishes them.
+- **Push a `v*` tag** (e.g. `v0.2.1`) → builds all four platform VSIX files and
+  publishes each to every registry whose token is configured.
 - **Manual run** (workflow_dispatch) → builds the VSIX artifacts only (no publish).
 
-Set the repository secret **`VSCE_PAT`** (Azure DevOps PAT with the
-`Marketplace: Manage` scope) for the publish step to run.
+Each registry is independent: if only one token is set, the other registry is
+skipped with a notice (the job still succeeds).
+
+| Secret | Registry | Scope |
+|--------|----------|-------|
+| `VSCE_PAT` | VS Code Marketplace | Azure DevOps PAT, `Marketplace: Manage` |
+| `OVSX_TOKEN` | Open VSX (Cursor, Windsurf, …) | Open VSX access token for the `emanubiz` namespace |
+
+### Token security (public repo)
+
+The repo is public, so the workflow file is visible and forkable. The tokens are
+**not** exposed, because:
+
+1. **Fork PRs never receive secrets.** GitHub withholds repository/environment
+   secrets from any workflow triggered by a `pull_request` from a fork. Someone
+   who forks the repo and edits the workflow to `echo` the token gets an empty
+   value — they cannot exfiltrate it.
+2. **Publish only runs on `v*` tags.** Tags can only be pushed by accounts with
+   write access (i.e. you). A malicious PR cannot reach the publish job.
+3. **Log masking.** GitHub auto-redacts secret values in logs, so an accidental
+   `echo $OVSX_TOKEN` prints `***`. (Masking is a safety net, not a boundary —
+   it can be defeated by re-encoding; points 1–2 are the real protection.)
+4. **`release` environment.** The publish job runs in the `release` environment.
+   Store `VSCE_PAT`/`OVSX_TOKEN` as **environment** secrets there (not plain repo
+   secrets) and add yourself as a **required reviewer** (repo Settings →
+   Environments → `release`) so every publish waits for a manual approval click —
+   even a malicious tag push then can't publish without your confirmation.
+
+> **Bottom line:** with the publish gated to tags + the `release` environment,
+> nobody editing the pipeline via a PR can read or use your tokens. The only
+> account that can publish is one that already has write access to the repo.
+
+To rotate a token, regenerate it at the provider and update the environment
+secret — no code change needed.
 
 ## Versioning
 

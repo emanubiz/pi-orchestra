@@ -1,11 +1,11 @@
 # PiNodes Orchestra — VS Code extension
 
-Runs the [pinodes-orchestra](../README.md) visual multi-agent console inside VS Code,
+Runs the [pinodes-orchestra](https://github.com/emanubiz/pinodes-orchestra#readme) visual multi-agent console inside VS Code,
 Cursor, Windsurf, and other VS Code–compatible editors: graph canvas, live per-node
 terminals, and visible `@@HANDOFF` delegation — the same UI as the standalone web
 app, embedded in an editor webview.
 
-> Implements **Phase 2** of [`docs/EXTENSIONS_ROADMAP.md`](../docs/EXTENSIONS_ROADMAP.md):
+> Implements **Phase 2** of the [extensions roadmap](https://github.com/emanubiz/pinodes-orchestra/blob/main/docs/EXTENSIONS_ROADMAP.md):
 > a thin wrapper that spawns the bundled Fastify backend as a Node subprocess
 > and frames the built frontend. No `node-pty` / `better-sqlite3` runs in the
 > extension host.
@@ -90,6 +90,16 @@ extension is self-contained — backend + frontend are bundled under `server/`.
 | `pinodesOrchestra.nodeCommand` | `node` | Node runtime used to launch the backend. |
 | `pinodesOrchestra.backendEntry` | _(auto)_ | Absolute path to `backend/dist/index.js`. Empty = resolve relative to the extension. |
 | `pinodesOrchestra.autoStartBackend` | `true` | Start the backend when the panel opens if none is running. |
+
+## Documentation
+
+All links are absolute so they resolve from the Open VSX / Marketplace listing too:
+
+- [Project README](https://github.com/emanubiz/pinodes-orchestra#readme) — quick start, PWA, configuration
+- [ARCHITECTURE.md](https://github.com/emanubiz/pinodes-orchestra/blob/main/ARCHITECTURE.md) — system design, WS protocol, `@@HANDOFF`
+- [docs/PROGRAMMATIC_API.md](https://github.com/emanubiz/pinodes-orchestra/blob/main/docs/PROGRAMMATIC_API.md) — REST + CLI orchestration API
+- [docs/EXTENSION_PUBLISHING.md](https://github.com/emanubiz/pinodes-orchestra/blob/main/docs/EXTENSION_PUBLISHING.md) — multi-platform VSIX build & dual-registry publishing
+- [docs/EXTENSIONS_ROADMAP.md](https://github.com/emanubiz/pinodes-orchestra/blob/main/docs/EXTENSIONS_ROADMAP.md) — host integrations roadmap
 
 ## Known limitations (MVP)
 

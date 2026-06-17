@@ -23,6 +23,9 @@ data/
 .vscode/
 .idea/
 
+# Build artifacts
+*.vsix
+
 # Logs
 *.log
 npm-debug.log*

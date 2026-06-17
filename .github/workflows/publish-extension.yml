@@ -8,7 +8,14 @@ name: Publish VS Code Extension
 #   - push a tag like `v0.2.1`  → build + publish
 #   - manual run (workflow_dispatch) → build only (artifacts), no publish
 #
-# Required secret for publishing: VSCE_PAT (Azure DevOps PAT, Marketplace:Manage).
+# Publishing secrets (set as Environment secrets on the `release` environment,
+# not plain repo secrets — see docs/EXTENSION_PUBLISHING.md):
+#   - VSCE_PAT   Azure DevOps PAT (Marketplace: Manage) — VS Code Marketplace
+#   - OVSX_TOKEN Open VSX access token (emanubiz namespace) — Cursor/Windsurf
+# Either may be omitted; that registry is then skipped with a notice.
+#
+# Secrets are never exposed to pull requests from forks, and the `release`
+# environment can require manual approval before the publish job runs.
 
 on:
   push:
@@ -66,11 +73,14 @@ jobs:
           if-no-files-found: error
 
   publish:
-    name: Publish to Marketplace
+    name: Publish (Marketplace + Open VSX)
     needs: build
-    # Only on a version tag, and only if the publish secret is configured.
+    # Only on a version tag. Secrets are scoped to the `release` environment,
+    # which can gate the job behind a manual approval (configure required
+    # reviewers in repo Settings → Environments → release).
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    environment: release
     steps:
       - uses: actions/setup-node@v4
         with:
@@ -82,15 +92,32 @@ jobs:
           path: vsix
           merge-multiple: true
 
-      - name: Publish every platform VSIX
+      # Tokens are read by vsce/ovsx straight from the environment (VSCE_PAT /
+      # OVSX_PAT) — never passed as a CLI arg, so they don't appear in process
+      # listings. GitHub also masks secret values in logs and withholds them from
+      # fork PRs entirely.
+      - name: Publish to VS Code Marketplace
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: |
           if [ -z "$VSCE_PAT" ]; then
-            echo "::error::VSCE_PAT secret is not set — cannot publish."
-            exit 1
+            echo "::notice::VSCE_PAT not set — skipping VS Code Marketplace."
+            exit 0
           fi
           for vsix in vsix/*.vsix; do
-            echo "Publishing $vsix"
-            npx --yes @vscode/vsce publish --packagePath "$vsix" -p "$VSCE_PAT"
+            echo "Marketplace: publishing $vsix"
+            npx --yes @vscode/vsce publish --packagePath "$vsix"
+          done
+
+      - name: Publish to Open VSX
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_TOKEN }}
+        run: |
+          if [ -z "$OVSX_PAT" ]; then
+            echo "::notice::OVSX_TOKEN not set — skipping Open VSX."
+            exit 0
+          fi
+          for vsix in vsix/*.vsix; do
+            echo "Open VSX: publishing $vsix"
+            npx --yes ovsx publish "$vsix"
           done
