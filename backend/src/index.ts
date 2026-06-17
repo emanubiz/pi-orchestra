@@ -78,6 +78,50 @@ app.post<{ Body: { boardId: string; column: string } }>(
   },
 );
 
+// Per-turn orchestration context, pulled by the extension's before_agent_start
+// to refresh the system-prompt appendix (recipients, finality, kanban) and to
+// give the determinism watchdog its source of truth for valid handoff targets.
+app.get<{ Querystring: { boardId?: string; nodeId?: string } }>(
+  "/internal/orchestra-context",
+  async (req, reply) => {
+    const { boardId, nodeId } = req.query;
+    if (!boardId || !nodeId) {
+      return reply.code(400).send({ error: "boardId and nodeId are required" });
+    }
+    const ctx = ptyHub.orchestraContext(boardId, nodeId);
+    if (!ctx) return reply.code(404).send({ error: "Unknown board or node" });
+    return { boardId, nodeId, ...ctx };
+  },
+);
+
+// Ready marker: the extension's session_start fires this so queued injects flush
+// immediately instead of waiting on a guessed timer.
+app.post<{ Body: { boardId: string; nodeId: string } }>(
+  "/internal/ready",
+  async (req) => {
+    const { boardId, nodeId } = req.body;
+    ptyHub.markReady(boardId, nodeId);
+    return { ok: true };
+  },
+);
+
+// The determinism watchdog gave up after retries — surface it on the node card.
+app.post<{
+  Body: { boardId: string; nodeId: string; reason: string; recipients?: string };
+}>("/internal/handoff-failed", async (req) => {
+  const { boardId, nodeId, reason, recipients } = req.body;
+  ptyHub.notify({
+    type: "node_status",
+    boardId,
+    nodeId,
+    status: "error",
+    message:
+      `Handoff not completed after retries (${reason}). ` +
+      `Expected recipient(s): ${recipients ?? "(none connected)"}.`,
+  });
+  return { ok: true };
+});
+
 app.post<{ Body: { path: string } }>("/api/validate-path", async (req, reply) => {
   const resolved = path.resolve(req.body.path);
   if (!fs.existsSync(resolved)) {

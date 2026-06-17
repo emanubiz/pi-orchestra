@@ -8,6 +8,15 @@ import type { NodeStatus, WorkflowEdge, WorkflowGraph, WorkflowNode } from "../t
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MAX_BUFFER = 256_000; // scrollback kept per node for re-attach
+// After pi reports `session_start` we give its TUI a brief moment to mount the
+// input line before pasting, so the first task can't race the initial render.
+const READY_SETTLE_MS = 250;
+// If the extension never reports ready (old pi, extension load failure), inject
+// after this so a queued task is never dropped — still better than a wrong 3s
+// guess that types into a not-yet-ready pi.
+const READY_FALLBACK_MS = 10_000;
+// Default for the determinism watchdog when a board has no explicit override.
+const ENFORCE_DEFAULT = process.env.PINODES_ORCHESTRA_ENFORCE !== "false";
 const PORT = Number(
   process.env.PINODES_ORCHESTRA_PORT ?? process.env.PORT ?? 3847,
 );
@@ -70,11 +79,18 @@ export class PtyHub {
   private graphs = new Map<string, BoardGraph>();
   private sessions = new Map<string, Session>();
   private pending = new Map<string, { cols: number; rows: number; message?: string }>();
-  // Last set of outgoing connections a running node was told about, so a live
-  // graph edit (wiring an edge after the terminal already booted) re-syncs the
-  // agent — its system prompt is fixed at spawn and can't learn it otherwise.
-  private connectionSig = new Map<string, string>();
+  // Nodes whose pi has reported `session_start` (booted and ready for input).
+  // Injects wait for this instead of guessing the boot time with a timer.
+  private ready = new Map<string, true>();
+  // Injects queued while a node is spawning, flushed on markReady (or a
+  // conservative fallback timeout if the extension never reports ready).
+  private waitingInjects = new Map<string, string[]>();
   private kanbanBoards = new Set<string>();
+  // Per-node override of the determinism watchdog, keyed by boardId:nodeId.
+  // Absent → use the env default (PINODES_ORCHESTRA_ENFORCE, on unless "false").
+  // Toggled live so the user can chat freely with one node without being asked
+  // "handoff or done?", while the rest of the board stays enforced.
+  private enforceOverride = new Map<string, boolean>();
   private cmd = resolvePiCommand();
   private events = new EventEmitter();
 
@@ -92,25 +108,40 @@ export class PtyHub {
     this.kanbanBoards.add(boardId);
   }
 
-  /** Store node + edge metadata and cwd for a board. Kills terminals of removed nodes. */
+  /** Whether the determinism watchdog is active for a node. */
+  isEnforced(boardId: string, nodeId: string): boolean {
+    return this.enforceOverride.get(key(boardId, nodeId)) ?? ENFORCE_DEFAULT;
+  }
+
+  /** Toggle the determinism watchdog for one node (live; read per loop by the
+   *  extension via orchestra-context). Broadcasts so the UI reflects it. */
+  setEnforcement(boardId: string, nodeId: string, enabled: boolean): void {
+    this.enforceOverride.set(key(boardId, nodeId), enabled);
+    this.broadcast({ type: "enforcement", boardId, nodeId, enabled });
+  }
+
+  /** Per-node enforcement overrides for a board (only nodes that differ from the
+   *  default), so a reconnecting client can sync its toggles. */
+  enforcementOverrides(boardId: string): Array<{ nodeId: string; enabled: boolean }> {
+    const out: Array<{ nodeId: string; enabled: boolean }> = [];
+    for (const [k, enabled] of this.enforceOverride) {
+      const [b, nodeId] = k.split(":");
+      if (b === boardId) out.push({ nodeId, enabled });
+    }
+    return out;
+  }
+
+  /**
+   * Store node + edge metadata and cwd for a board. Kills terminals of removed
+   * nodes and spawns any that were pending. Orchestration context (recipients,
+   * finality, kanban) is NOT pushed into running terminals here: each agent
+   * pulls the current context per turn via /internal/orchestra-context, so a
+   * live graph edit is picked up on the node's next turn without typing into
+   * the PTY (which pi used to mistake for a new user task).
+   */
   setGraph(boardId: string, graph: WorkflowGraph, cwd: string): void {
-    const prev = this.graphs.get(boardId);
     const nodes = new Map(graph.nodes.map((n) => [n.id, n]));
     this.graphs.set(boardId, { cwd, nodes, edges: graph.edges ?? [] });
-    // Live finality toggle: if a node's canBeFinal flipped while its pi is
-    // running, tell the agent the rule changed so it adapts mid-flow (e.g. it
-    // was forced to hand off, now it may close the loop if the ball returns).
-    if (prev) {
-      for (const [id, node] of nodes) {
-        const before = prev.nodes.get(id);
-        if (!before) continue;
-        const wasFinal = before.canBeFinal !== false;
-        const nowFinal = node.canBeFinal !== false;
-        if (wasFinal !== nowFinal && this.sessions.has(key(boardId, id))) {
-          this.notifyFinalityChange(boardId, id, nowFinal);
-        }
-      }
-    }
     for (const k of [...this.sessions.keys()]) {
       const [b, nodeId] = k.split(":");
       if (b === boardId && !nodes.has(nodeId)) this.kill(boardId, nodeId);
@@ -128,30 +159,41 @@ export class PtyHub {
         }
       }
     }
-    // Live connection sync: the system prompt's hand-off instructions are baked
-    // in at spawn, so a node wired up (or unwired) while its pi is already
-    // running would never learn it can now hand off. Diff each running node's
-    // outgoing set against what it was last told and notify on a real change.
-    // Mirrors the finality toggle above; deduped so it never fires on no-op
-    // graph syncs (e.g. a node drag re-sending the same graph).
-    for (const k of [...this.sessions.keys()]) {
-      const [b, nodeId] = k.split(":");
-      if (b !== boardId) continue;
-      const sig = this.outgoingSignature(boardId, nodeId);
-      if (this.connectionSig.get(k) === sig) continue;
-      const knew = this.connectionSig.has(k);
-      this.connectionSig.set(k, sig);
-      if (knew) this.notifyConnectionsChange(boardId, nodeId);
-    }
   }
 
-  /** Stable fingerprint of a node's outgoing connections (handle + label). */
-  private outgoingSignature(boardId: string, nodeId: string): string {
+  /**
+   * Read-only orchestration context for a node, consumed by the per-turn
+   * system-prompt refresh (and the determinism watchdog) in the extension.
+   * Returns null for an unknown board/node so the extension degrades to its
+   * spawn-time baked fallback appendix.
+   */
+  orchestraContext(
+    boardId: string,
+    nodeId: string,
+  ): {
+    appendix: string;
+    canBeFinal: boolean;
+    outgoing: Array<{ id: string; handle: string; label: string }>;
+    kanban: boolean;
+    enforce: boolean;
+  } | null {
+    const graph = this.graphs.get(boardId);
+    if (!graph || !graph.nodes.has(nodeId)) return null;
     const handles = this.handles(boardId);
-    return this.outgoingTargets(boardId, nodeId)
-      .map((t) => `${handles.get(t.id)}:${t.label}`)
-      .sort()
-      .join("|");
+    const outgoing = this.outgoingTargets(boardId, nodeId).map((t) => ({
+      id: t.id,
+      handle: handles.get(t.id) ?? t.label,
+      label: t.label,
+    }));
+    const kanban = this.kanbanBoards.has(boardId);
+    return {
+      appendix:
+        this.connectionsAppendix(boardId, nodeId) + (kanban ? this.kanbanAppendix() : ""),
+      canBeFinal: this.canBeFinal(boardId, nodeId),
+      outgoing,
+      kanban,
+      enforce: this.isEnforced(boardId, nodeId),
+    };
   }
 
   /** Nodes this node can hand off to: the targets of its outgoing edges. */
@@ -212,7 +254,8 @@ export class PtyHub {
     if (targets.length === 0) {
       return (
         "\n\n## Orchestration\n" +
-        "You have no outgoing connected agents: carry the task through to completion yourself.\n"
+        "You have no outgoing connected agents: carry the task through to completion yourself. " +
+        "When the task is finished, end your turn with `@@DONE` on its own line.\n"
       );
     }
     const handles = this.handles(boardId);
@@ -220,11 +263,14 @@ export class PtyHub {
     // A non-final node must always pass the ball downstream; a final-capable one
     // may close the chain when its part truly finishes the task.
     const endingRule = this.canBeFinal(boardId, nodeId)
-      ? "- Ending is allowed: if your part finishes the task and nothing is left for a downstream " +
-        "agent (e.g. a final review you approve), just don't write a hand-off block.\n"
+      ? "- Ending is allowed, but it must be EXPLICIT: if your part finishes the task and nothing " +
+        "is left for a downstream agent (e.g. a final review you approve), end your turn with " +
+        "`@@DONE` on its own line. Do NOT end silently — a turn that has neither a @@HANDOFF block " +
+        "nor @@DONE will be bounced back asking you to choose.\n"
       : "- You are NOT a terminal node: you must NEVER end the chain yourself. When your part is " +
         "done you are REQUIRED to hand off to one of the connected agents below — always close " +
-        "your message with a @@HANDOFF block. (This rule can be lifted later at runtime.)\n";
+        "your message with a @@HANDOFF block. Do not use @@DONE (it is not permitted for you). " +
+        "(This rule can be lifted later at runtime.)\n";
     return (
       "\n\n## Orchestration — you are one link in a pipeline of agents\n" +
       "CORE RULE: this runs as a pipeline — do your part, then hand the next step to the " +
@@ -245,8 +291,8 @@ export class PtyHub {
       "@@END\n\n" +
       "Example: an architect produces the plan/spec and hands it to the developer — it does NOT " +
       "implement; the developer implements and hands off to QA/the auditor; the auditor reviews and, " +
-      "if everything is fine, closes the chain WITHOUT handing off further. The system delivers each " +
-      "hand-off automatically into the recipient's terminal.\n"
+      "if everything is fine, closes the chain with `@@DONE`. The system delivers each hand-off " +
+      "automatically into the recipient's terminal.\n"
     );
   }
 
@@ -307,13 +353,22 @@ export class PtyHub {
     const node = graph?.nodes.get(nodeId);
     const cwd = graph?.cwd && fs.existsSync(graph.cwd) ? graph.cwd : process.cwd();
 
-    let systemPrompt = "";
+    let rolePrompt = "";
     if (node) {
       const row = getPrompt(node.promptId);
-      systemPrompt = (node.promptOverride?.trim() || row?.content || "").trim();
+      rolePrompt = (node.promptOverride?.trim() || row?.content || "").trim();
     }
-    systemPrompt += this.connectionsAppendix(boardId, nodeId);
-    if (this.kanbanBoards.has(boardId)) systemPrompt += this.kanbanAppendix();
+    // The orchestration appendix (recipients, finality, kanban) is refreshed per
+    // turn by the extension via /internal/orchestra-context, so it is NOT baked
+    // into --system-prompt when the extension is present. We still bake a
+    // snapshot into env so the extension can degrade gracefully if the backend
+    // is briefly unreachable. Without the extension there is no per-turn refresh,
+    // so the appendix is baked directly into the system prompt instead.
+    const appendix =
+      this.connectionsAppendix(boardId, nodeId) +
+      (this.kanbanBoards.has(boardId) ? this.kanbanAppendix() : "");
+    const hasExtension = fs.existsSync(EXTENSION_PATH);
+    const systemPrompt = (hasExtension ? rolePrompt : rolePrompt + appendix).trim();
 
     const args = [
       ...this.cmd.baseArgs,
@@ -324,9 +379,9 @@ export class PtyHub {
       "--name",
       node?.label ?? "pi",
       "--system-prompt",
-      systemPrompt.trim(),
+      systemPrompt,
     ];
-    if (fs.existsSync(EXTENSION_PATH)) args.push("--extension", EXTENSION_PATH);
+    if (hasExtension) args.push("--extension", EXTENSION_PATH);
 
     console.log("pinodes-orchestra: spawning pi", this.cmd.file, args);
     const term = pty.spawn(this.cmd.file, args, {
@@ -339,15 +394,17 @@ export class PtyHub {
         PINODES_ORCHESTRA_URL: BASE_URL,
         PINODES_ORCHESTRA_BOARD: boardId,
         PINODES_ORCHESTRA_NODE: nodeId,
+        PINODES_ORCHESTRA_FALLBACK_APPENDIX: appendix,
       } as Record<string, string>,
     });
 
     const session: Session = { pty: term, buffer: "", cols, rows, startedAt: Date.now() };
     const k = key(boardId, nodeId);
     this.sessions.set(k, session);
-    // Baseline for live connection sync: the spawn-time system prompt already
-    // reflects these, so a later setGraph only notifies if this changes.
-    this.connectionSig.set(k, this.outgoingSignature(boardId, nodeId));
+    // A fresh session is not yet ready for input; the extension's session_start
+    // will mark it (or the fallback timeout in scheduleInject will).
+    this.ready.delete(k);
+    this.waitingInjects.delete(k);
     this.broadcast({ type: "node_status", boardId, nodeId, status: "running" });
     // Tell read-only mirrors the PTY's real size so they can render pi's
     // absolute-cursor output faithfully (and scale it down) instead of fitting
@@ -363,7 +420,8 @@ export class PtyHub {
       // Only clear if this exact session is still the active one (guards restart).
       if (this.sessions.get(k) === session) {
         this.sessions.delete(k);
-        this.connectionSig.delete(k);
+        this.ready.delete(k);
+        this.waitingInjects.delete(k);
       }
       this.broadcast({ type: "pty_exit", boardId, nodeId, code: exitCode });
       this.broadcast({ type: "node_status", boardId, nodeId, status: "idle" });
@@ -449,6 +507,12 @@ export class PtyHub {
 
     this.scheduleInject(boardId, target.id, message);
 
+    // The sender just handed off successfully, so clear any stale "handoff
+    // failed" error on its card (it is alive and running).
+    if (this.sessions.has(key(boardId, fromNodeId))) {
+      this.broadcast({ type: "node_status", boardId, nodeId: fromNodeId, status: "running" });
+    }
+
     return {
       ok: true,
       message: `Task delivered to ${target.label}. It is working in its terminal.`,
@@ -464,72 +528,55 @@ export class PtyHub {
   }
 
   /**
-   * Tell an already-running node that its finality rule changed. No-op if it has
-   * no outgoing edges (finality is meaningless without somewhere to hand off).
+   * Mark a node's pi as booted (its extension reported `session_start`). Flushes
+   * any injects that were queued while it was still spawning.
    */
-  private notifyFinalityChange(boardId: string, nodeId: string, canBeFinal: boolean): void {
-    if (!this.sessions.has(key(boardId, nodeId))) return;
-    if (this.outgoingTargets(boardId, nodeId).length === 0) return;
-    const message = canBeFinal
-      ? "[orchestra] Rule update: you are NOW allowed to end the chain. If the work is truly " +
-        "complete and nothing is left for a downstream agent, you may finish without a @@HANDOFF block."
-      : "[orchestra] Rule update: you are NO LONGER allowed to end the chain. When your current " +
-        "part is done you MUST hand off to a connected agent — always close with a @@HANDOFF block.";
-    this.inject(boardId, nodeId, message);
+  markReady(boardId: string, nodeId: string): void {
+    const k = key(boardId, nodeId);
+    if (!this.sessions.has(k)) return;
+    this.ready.set(k, true);
+    const queued = this.waitingInjects.get(k);
+    if (queued && queued.length) {
+      this.waitingInjects.delete(k);
+      // Give the TUI a beat to mount its input line before the first paste.
+      setTimeout(() => {
+        for (const msg of queued) this.inject(boardId, nodeId, msg);
+      }, READY_SETTLE_MS);
+    }
   }
 
   /**
-   * Tell an already-running node that its outgoing connections changed (an edge
-   * was wired or removed on the canvas after it booted). Gives it the current
-   * recipient list and the @@HANDOFF format, since the system prompt — fixed at
-   * spawn — cannot be amended on a live pi.
+   * Ensure the node is running, then inject once its pi is ready. If the node
+   * has already reported ready the inject fires immediately; otherwise it is
+   * queued and flushed by markReady (or a conservative fallback timeout, so a
+   * task is never dropped even if the extension never reports ready).
    */
-  private notifyConnectionsChange(boardId: string, nodeId: string): void {
-    if (!this.sessions.has(key(boardId, nodeId))) return;
-    const targets = this.outgoingTargets(boardId, nodeId);
-    if (targets.length === 0) {
-      this.inject(
-        boardId,
-        nodeId,
-        "[orchestra] Connection update: you no longer have any outgoing connected agents. " +
-          "Carry the task through to completion yourself — do not write a @@HANDOFF block.",
-      );
-      return;
-    }
-    const handles = this.handles(boardId);
-    const lines = targets.map((t) => `- ${handles.get(t.id)} — ${t.label}`).join("\n");
-    this.inject(
-      boardId,
-      nodeId,
-      "[orchestra] Connection update: you can now hand work off to the agents below. When your " +
-        "part is done, delegate the next step by ending your message with a hand-off block in " +
-        "EXACTLY this format (no backticks, no text after @@END):\n\n" +
-        "@@HANDOFF:<recipient-handle>\n" +
-        "<complete, self-contained instructions: what you produced, files touched, what they must do>\n" +
-        "@@END\n\n" +
-        "Agents you can hand off to (use the handle on the left):\n" +
-        lines,
-    );
-  }
-
-  /** Ensure the node is running, then inject once its pi has had time to boot. */
   private scheduleInject(boardId: string, nodeId: string, message: string): void {
     this.ensure(boardId, nodeId, 80, 24);
     const k = key(boardId, nodeId);
     const s = this.sessions.get(k);
-    if (s) {
-      // Session exists — inject after the remaining boot delay.
-      const age = Date.now() - s.startedAt;
-      const delay = Math.max(150, 3000 - age);
-      setTimeout(() => this.inject(boardId, nodeId, message), delay);
+    if (!s) {
+      // Session was deferred (graph not synced yet) — store the message so it is
+      // injected when setGraph spawns the terminal (see the pending loop there).
+      const pending = this.pending.get(k);
+      if (pending) pending.message = message;
       return;
     }
-    // Session was deferred (graph not synced yet) — store the message so it is
-    // injected when setGraph spawns the terminal (see the pending loop there).
-    const pending = this.pending.get(k);
-    if (pending) {
-      pending.message = message;
+    if (this.ready.has(k)) {
+      this.inject(boardId, nodeId, message);
+      return;
     }
+    // Not ready yet → queue; flushed on markReady or on the fallback timeout.
+    const q = this.waitingInjects.get(k) ?? [];
+    q.push(message);
+    this.waitingInjects.set(k, q);
+    setTimeout(() => {
+      if (this.ready.has(k)) return; // markReady already flushed it
+      const pending = this.waitingInjects.get(k);
+      if (!pending || pending.length === 0) return;
+      this.waitingInjects.delete(k);
+      for (const msg of pending) this.inject(boardId, nodeId, msg);
+    }, READY_FALLBACK_MS);
   }
 
   /** Type text into a node's pi editor as a bracketed paste, then submit. */
@@ -573,7 +620,8 @@ export class PtyHub {
     const s = this.sessions.get(k);
     if (!s) return;
     this.sessions.delete(k);
-    this.connectionSig.delete(k);
+    this.ready.delete(k);
+    this.waitingInjects.delete(k);
     try {
       s.pty.kill();
     } catch (err) {
