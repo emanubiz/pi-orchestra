@@ -38,10 +38,12 @@ jobs:
             target: linux-x64
           - os: windows-latest
             target: win32-x64
-          - os: macos-13 # Intel
-            target: darwin-x64
           - os: macos-14 # Apple Silicon
             target: darwin-arm64
+          # darwin-x64 (Intel Mac) is dropped: GitHub no longer offers a free
+          # Intel macOS runner, so the job hangs forever "waiting for a runner".
+          # Re-add `- os: macos-13 / target: darwin-x64` if a runner becomes
+          # available (or use a self-hosted Intel Mac).
     steps:
       - uses: actions/checkout@v4
 

@@ -24,8 +24,8 @@ A VSIX built on Linux **will not work** on Windows or macOS. The VS Code Marketp
 |----------|---------------|--------------|-------|
 | Linux x64 | `linux-x64` | 24.x (ABI 137) | Primary CI target |
 | Windows x64 | `win32-x64` | 24.x (ABI 137) | Requires Visual Studio Build Tools |
-| macOS x64 | `darwin-x64` | 24.x (ABI 137) | Intel Macs |
 | macOS arm64 | `darwin-arm64` | 24.x (ABI 137) | Apple Silicon (M-series) |
+| ~~macOS x64~~ | `darwin-x64` | — | **Not built in CI**: GitHub no longer offers a free Intel macOS runner. Build locally on an Intel Mac if needed. |
 
 ## Build Prerequisites (per machine)
 
