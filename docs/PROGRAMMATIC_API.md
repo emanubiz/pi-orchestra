@@ -150,9 +150,13 @@ GET /api/v1/orchestra/boards/:boardId/graph
 Equivalent WebSocket command: `{ type: "load_graph", graph, cwd }`.
 
 > **Validation (400).** Every graph-edit path (this `PUT`, plus the granular
-> node/edge endpoints) is rejected with `400` if a node is `canBeFinal: false`
-> and has **no outgoing edge** — it could neither end the chain nor hand off.
-> Connect it downstream first, or set `canBeFinal: true`.
+> node/edge endpoints) runs through `BoardManager.validateGraph` and is rejected
+> with `400` when:
+> - a node is `canBeFinal: false` and has **no outgoing edge** — it could neither
+>   end the chain nor hand off (connect it downstream, or set `canBeFinal: true`);
+> - an edge is a **self-loop** (`sourceNodeId === targetNodeId`);
+> - an edge targets a **non-existent node** (`sourceNodeId` / `targetNodeId` not
+>   in the graph).
 
 ### Execution
 

@@ -257,4 +257,6 @@ Boards (cwd, label, graph snapshot) are persisted in the `boards` SQLite table. 
 - Per-node model config UI
 - Run history / analytics
 - Multi-user / RBAC
-- Edge conditions / labels
+- Edge conditions / labels (`@@HANDOFF:<handle> IF <condition>` guards)
+- Handoff log / timeline panel (a view of the from→to handoff stream; `handoff-failed` would surface here too)
+- CLI `--json` flag (machine-readable output; the CLI prints human-friendly text today)
