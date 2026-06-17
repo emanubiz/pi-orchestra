@@ -375,6 +375,177 @@ describe("orchestra routes", () => {
     expect(ptyHub.waitForExit).toHaveBeenCalledWith(expect.any(String), "arch", 5000);
   });
 
+  it("deletes the temporary flow board after a completed wait", async () => {
+    const { app, manager } = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/orchestra/flows",
+      payload: {
+        name: "Deploy",
+        cwd: "/tmp",
+        graph: sampleGraph,
+        message: "deploy app",
+        wait: true,
+      },
+    });
+    const body = JSON.parse(res.body);
+    expect(body.timedOut).toBe(false);
+    // Completed flow → board auto-cleaned up.
+    expect(manager.get(body.boardId)).toBeUndefined();
+  });
+
+  it("keeps the flow board when the wait times out", async () => {
+    const { app, manager, ptyHub } = await buildApp();
+    ptyHub.waitForExit = vi.fn(() =>
+      Promise.resolve({ code: null, timedOut: true }),
+    );
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/orchestra/flows",
+      payload: {
+        name: "Deploy",
+        cwd: "/tmp",
+        graph: sampleGraph,
+        message: "deploy app",
+        wait: true,
+        waitTimeoutMs: 10,
+      },
+    });
+    const body = JSON.parse(res.body);
+    expect(body.timedOut).toBe(true);
+    expect(body.status).toBe("running");
+    // Timed-out flow is still live → board preserved for inspection.
+    expect(manager.get(body.boardId)).toBeDefined();
+  });
+
+  // ── granular node/edge CRUD ────────────────────────────────────────────────
+
+  async function boardWithGraph(app: Awaited<ReturnType<typeof buildApp>>["app"]) {
+    const boardId = JSON.parse(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/api/v1/orchestra/boards",
+          payload: { cwd: "/tmp" },
+        })
+      ).body,
+    ).boardId;
+    await app.inject({
+      method: "PUT",
+      url: `/api/v1/orchestra/boards/${boardId}/graph`,
+      payload: sampleGraph,
+    });
+    return boardId;
+  }
+
+  it("adds, updates and deletes a node", async () => {
+    const { app } = await buildApp();
+    const boardId = await boardWithGraph(app);
+
+    const add = await app.inject({
+      method: "POST",
+      url: `/api/v1/orchestra/boards/${boardId}/nodes`,
+      payload: { label: "Reviewer", promptId: "p3", position: { x: 200, y: 0 } },
+    });
+    expect(add.statusCode).toBe(200);
+    const nodeId = JSON.parse(add.body).node.id as string;
+    expect(nodeId).toBeTruthy();
+
+    const patch = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/orchestra/boards/${boardId}/nodes/${nodeId}`,
+      payload: { label: "Critic" },
+    });
+    expect(patch.statusCode).toBe(200);
+    expect(JSON.parse(patch.body).node.label).toBe("Critic");
+
+    const del = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/orchestra/boards/${boardId}/nodes/${nodeId}`,
+    });
+    expect(del.statusCode).toBe(200);
+    expect(JSON.parse(del.body)).toEqual({ ok: true });
+  });
+
+  it("validates node creation and 404s unknown nodes", async () => {
+    const { app } = await buildApp();
+    const boardId = await boardWithGraph(app);
+
+    const missing = await app.inject({
+      method: "POST",
+      url: `/api/v1/orchestra/boards/${boardId}/nodes`,
+      payload: { promptId: "p", position: { x: 0, y: 0 } },
+    });
+    expect(missing.statusCode).toBe(400);
+
+    const badPos = await app.inject({
+      method: "POST",
+      url: `/api/v1/orchestra/boards/${boardId}/nodes`,
+      payload: { label: "X", promptId: "p" },
+    });
+    expect(badPos.statusCode).toBe(400);
+
+    const patch404 = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/orchestra/boards/${boardId}/nodes/ghost`,
+      payload: { label: "X" },
+    });
+    expect(patch404.statusCode).toBe(404);
+
+    const del404 = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/orchestra/boards/${boardId}/nodes/ghost`,
+    });
+    expect(del404.statusCode).toBe(404);
+  });
+
+  it("adds and deletes an edge, rejecting invalid ones", async () => {
+    const { app } = await buildApp();
+    const boardId = await boardWithGraph(app);
+
+    const add = await app.inject({
+      method: "POST",
+      url: `/api/v1/orchestra/boards/${boardId}/edges`,
+      payload: { sourceNodeId: "dev", targetNodeId: "arch" },
+    });
+    expect(add.statusCode).toBe(200);
+    const edgeId = JSON.parse(add.body).edge.id as string;
+
+    const selfLoop = await app.inject({
+      method: "POST",
+      url: `/api/v1/orchestra/boards/${boardId}/edges`,
+      payload: { sourceNodeId: "arch", targetNodeId: "arch" },
+    });
+    expect(selfLoop.statusCode).toBe(400);
+    expect(JSON.parse(selfLoop.body).error).toContain("Self-loop");
+
+    const dangling = await app.inject({
+      method: "POST",
+      url: `/api/v1/orchestra/boards/${boardId}/edges`,
+      payload: { sourceNodeId: "arch", targetNodeId: "ghost" },
+    });
+    expect(dangling.statusCode).toBe(400);
+
+    const missing = await app.inject({
+      method: "POST",
+      url: `/api/v1/orchestra/boards/${boardId}/edges`,
+      payload: { sourceNodeId: "arch" },
+    });
+    expect(missing.statusCode).toBe(400);
+
+    const del = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/orchestra/boards/${boardId}/edges/${edgeId}`,
+    });
+    expect(del.statusCode).toBe(200);
+
+    const del404 = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/orchestra/boards/${boardId}/edges/ghost`,
+    });
+    expect(del404.statusCode).toBe(404);
+  });
+
   it("validates required flow fields", async () => {
     const { app } = await buildApp();
     const res = await app.inject({

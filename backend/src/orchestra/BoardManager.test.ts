@@ -258,3 +258,126 @@ describe("BoardManager", () => {
     expect(status.edges).toEqual([{ id: "e1", sourceNodeId: "n1", targetNodeId: "n2" }]);
   });
 });
+
+describe("BoardManager granular CRUD", () => {
+  beforeEach(() => {
+    mockBoards.clear();
+  });
+
+  function seed() {
+    const ptyHub = makeFakePtyHub();
+    const manager = new BoardManager(ptyHub);
+    const board = manager.create("/tmp");
+    manager.setGraph(board.boardId, structuredClone(sampleGraph));
+    return { ptyHub, manager, boardId: board.boardId };
+  }
+
+  // ── nodes ──────────────────────────────────────────────────────────────────
+
+  it("addNode appends a node with a generated id and persists", () => {
+    const { manager, ptyHub, boardId } = seed();
+    const node = manager.addNode(boardId, {
+      label: "Reviewer",
+      promptId: "p3",
+      position: { x: 200, y: 0 },
+    });
+    expect(node.id).toBeTruthy();
+    expect(manager.getGraph(boardId)?.nodes).toHaveLength(3);
+    expect(ptyHub.setGraph).toHaveBeenCalled();
+  });
+
+  it("addNode honours a caller-supplied id", () => {
+    const { manager, boardId } = seed();
+    const node = manager.addNode(boardId, {
+      id: "custom",
+      label: "X",
+      promptId: "p3",
+      position: { x: 0, y: 0 },
+    });
+    expect(node.id).toBe("custom");
+  });
+
+  it("addNode throws on an unknown board", () => {
+    const manager = new BoardManager(makeFakePtyHub());
+    expect(() =>
+      manager.addNode("nope", { label: "X", promptId: "p", position: { x: 0, y: 0 } }),
+    ).toThrow("Board not found");
+  });
+
+  it("updateNode mutates only the provided fields and returns the node", () => {
+    const { manager, boardId } = seed();
+    const updated = manager.updateNode(boardId, "n1", {
+      label: "Renamed",
+      canBeFinal: false,
+    });
+    expect(updated.label).toBe("Renamed");
+    expect(updated.canBeFinal).toBe(false);
+    // untouched field preserved
+    expect(updated.promptId).toBe("p1");
+    expect(manager.getGraph(boardId)?.nodes.find((n) => n.id === "n1")?.label).toBe("Renamed");
+  });
+
+  it("updateNode throws 'Node not found' for an unknown node", () => {
+    const { manager, boardId } = seed();
+    expect(() => manager.updateNode(boardId, "ghost", { label: "X" })).toThrow(
+      "Node not found",
+    );
+  });
+
+  it("deleteNode removes the node, orphan edges, and clears entryNodeId", () => {
+    const { manager, boardId } = seed();
+    expect(manager.deleteNode(boardId, "n1")).toBe(true);
+    const graph = manager.getGraph(boardId);
+    expect(graph?.nodes.map((n) => n.id)).toEqual(["n2"]);
+    expect(graph?.edges).toHaveLength(0); // e1 referenced n1
+    expect(graph?.entryNodeId).toBeNull(); // entry was n1
+  });
+
+  it("deleteNode returns false for an unknown node", () => {
+    const { manager, boardId } = seed();
+    expect(manager.deleteNode(boardId, "ghost")).toBe(false);
+  });
+
+  it("deleteNode throws on an unknown board", () => {
+    const manager = new BoardManager(makeFakePtyHub());
+    expect(() => manager.deleteNode("nope", "n1")).toThrow("Board not found");
+  });
+
+  // ── edges ──────────────────────────────────────────────────────────────────
+
+  it("addEdge connects two existing nodes with a generated id", () => {
+    const { manager, boardId } = seed();
+    const edge = manager.addEdge(boardId, { sourceNodeId: "n2", targetNodeId: "n1" });
+    expect(edge.id).toBeTruthy();
+    expect(manager.getGraph(boardId)?.edges).toHaveLength(2);
+  });
+
+  it("addEdge rejects a self-loop", () => {
+    const { manager, boardId } = seed();
+    expect(() =>
+      manager.addEdge(boardId, { sourceNodeId: "n1", targetNodeId: "n1" }),
+    ).toThrow("Self-loop");
+  });
+
+  it("addEdge rejects edges to non-existent nodes", () => {
+    const { manager, boardId } = seed();
+    expect(() =>
+      manager.addEdge(boardId, { sourceNodeId: "n1", targetNodeId: "ghost" }),
+    ).toThrow("Target node not found");
+    expect(() =>
+      manager.addEdge(boardId, { sourceNodeId: "ghost", targetNodeId: "n1" }),
+    ).toThrow("Source node not found");
+  });
+
+  it("deleteEdge removes the edge and returns true", () => {
+    const { manager, boardId } = seed();
+    expect(manager.deleteEdge(boardId, "e1")).toBe(true);
+    expect(manager.getGraph(boardId)?.edges).toHaveLength(0);
+  });
+
+  it("deleteEdge returns false for an unknown edge or board", () => {
+    const { manager, boardId } = seed();
+    expect(manager.deleteEdge(boardId, "ghost")).toBe(false);
+    expect(manager.deleteEdge("nope", "e1")).toBe(false);
+  });
+});
