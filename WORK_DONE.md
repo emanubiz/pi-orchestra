@@ -118,6 +118,15 @@ Che garantisce automaticamente:
 - Live sync (`notifyConnectionsChange`, `notifyFinalityChange`) per nodi in esecuzione
 - PTY kill per nodi cancellati
 
+> **Superato dal lavoro "Deterministic Orchestration"** (branch
+> `feat/deterministic-orchestration`). Il live sync via `notifyConnectionsChange` /
+> `notifyFinalityChange` (che digitava nel PTY) è stato **rimosso**: il contesto
+> di orchestrazione è ora ripreso **per-turno** dall'estensione via
+> `GET /internal/orchestra-context`. Inoltre i metodi CRUD non mutano più la
+> reference in-memory in place ma costruiscono un grafo nuovo (immutabile), così
+> un fallimento della nuova `validateGraph` non lascia stato sporco. Vedi
+> `ARCHITECTURE.md → Handoff protocol` e `DETERMINISTIC_ORCHESTRATION_DESIGN.md`.
+
 ---
 
 ## 4. Stato attuale

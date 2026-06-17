@@ -83,11 +83,34 @@ export class BoardManager {
     return true;
   }
 
+  /**
+   * Reject a contradictory graph before it is persisted: a node marked
+   * non-final (canBeFinal === false) but with no outgoing edges can neither end
+   * the chain nor hand off — the agent could never satisfy its rule. Every CRUD
+   * path funnels through setGraph, so this single chokepoint covers them all.
+   */
+  private validateGraph(graph: WorkflowGraph): void {
+    const outCount = new Map<string, number>();
+    for (const e of graph.edges) {
+      outCount.set(e.sourceNodeId, (outCount.get(e.sourceNodeId) ?? 0) + 1);
+    }
+    for (const n of graph.nodes) {
+      if (n.canBeFinal === false && (outCount.get(n.id) ?? 0) === 0) {
+        throw new Error(
+          `Node "${n.label}" is marked non-final (canBeFinal=false) but has no ` +
+            `outgoing edges — it can neither end the chain nor hand off. Connect it ` +
+            `to at least one downstream node, or set canBeFinal=true.`,
+        );
+      }
+    }
+  }
+
   setGraph(boardId: string, graph: WorkflowGraph): BoardState {
     const board = this.boards.get(boardId);
     if (!board) throw new Error(`Board not found: ${boardId}`);
     const cwd = graph.cwd && graph.cwd.trim() ? this.resolveCwd(graph.cwd.trim()) : board.cwd;
     const graphWithCwd: WorkflowGraph = { ...graph, cwd };
+    this.validateGraph(graphWithCwd); // throws before any persistence side effect
     const saved = dbSaveBoardGraph(boardId, graphWithCwd);
     if (!saved) throw new Error(`Failed to save graph for board: ${boardId}`);
     this.boards.set(boardId, saved);
@@ -180,10 +203,14 @@ export class BoardManager {
 
     const nodeId = node.id ?? crypto.randomUUID();
     const newNode: WorkflowNode = { ...node, id: nodeId };
-    board.graph.nodes.push(newNode);
 
-    // Persist via setGraph (saves to DB + re-syncs PtyHub)
-    this.setGraph(boardId, board.graph);
+    // Build the next graph immutably so a validation failure in setGraph never
+    // leaves the in-memory graph half-mutated.
+    const nextGraph: WorkflowGraph = {
+      ...board.graph,
+      nodes: [...board.graph.nodes, newNode],
+    };
+    this.setGraph(boardId, nextGraph);
     return newNode;
   }
 
@@ -192,16 +219,20 @@ export class BoardManager {
     nodeId: string,
     patch: Partial<Omit<WorkflowNode, "id">>,
   ): WorkflowNode {
-    const { board, graph, node } = this.getNode(boardId, nodeId);
+    const { graph, node } = this.getNode(boardId, nodeId);
 
-    if (patch.label !== undefined) node.label = patch.label;
-    if (patch.promptId !== undefined) node.promptId = patch.promptId;
-    if (patch.promptOverride !== undefined) node.promptOverride = patch.promptOverride;
-    if (patch.canBeFinal !== undefined) node.canBeFinal = patch.canBeFinal;
-    if (patch.position !== undefined) node.position = patch.position;
+    const updatedNode: WorkflowNode = { ...node };
+    if (patch.label !== undefined) updatedNode.label = patch.label;
+    if (patch.promptId !== undefined) updatedNode.promptId = patch.promptId;
+    if (patch.promptOverride !== undefined) updatedNode.promptOverride = patch.promptOverride;
+    if (patch.canBeFinal !== undefined) updatedNode.canBeFinal = patch.canBeFinal;
+    if (patch.position !== undefined) updatedNode.position = patch.position;
 
-    // Persist via setGraph (saves to DB + triggers live finality/connection sync)
-    this.setGraph(boardId, graph);
+    const nextGraph: WorkflowGraph = {
+      ...graph,
+      nodes: graph.nodes.map((n) => (n.id === nodeId ? updatedNode : n)),
+    };
+    this.setGraph(boardId, nextGraph);
 
     // Return the updated node from the freshly saved graph
     const updated = this.boards.get(boardId)?.graph?.nodes.find((n) => n.id === nodeId);
@@ -214,23 +245,20 @@ export class BoardManager {
     if (!board) throw new Error(`Board not found: ${boardId}`);
     if (!board.graph) throw new Error(`No graph loaded for board: ${boardId}`);
 
-    const idx = board.graph.nodes.findIndex((n) => n.id === nodeId);
-    if (idx === -1) return false;
+    if (!board.graph.nodes.some((n) => n.id === nodeId)) return false;
 
-    board.graph.nodes.splice(idx, 1);
-
-    // Also remove any edges referencing this node
-    board.graph.edges = board.graph.edges.filter(
-      (e) => e.sourceNodeId !== nodeId && e.targetNodeId !== nodeId,
-    );
-
-    // Clear entryNodeId if it was the deleted node
-    if (board.graph.entryNodeId === nodeId) {
-      board.graph.entryNodeId = null;
-    }
-
-    // Persist via setGraph — PtyHub auto-kills the node's PTY if running
-    this.setGraph(boardId, board.graph);
+    const nextGraph: WorkflowGraph = {
+      ...board.graph,
+      nodes: board.graph.nodes.filter((n) => n.id !== nodeId),
+      // Drop any edges referencing the removed node.
+      edges: board.graph.edges.filter(
+        (e) => e.sourceNodeId !== nodeId && e.targetNodeId !== nodeId,
+      ),
+      // Clear entryNodeId if it pointed at the removed node.
+      entryNodeId: board.graph.entryNodeId === nodeId ? null : board.graph.entryNodeId,
+    };
+    // Persist via setGraph — PtyHub auto-kills the node's PTY if running.
+    this.setGraph(boardId, nextGraph);
     return true;
   }
 
@@ -260,9 +288,11 @@ export class BoardManager {
 
     const edgeId = edge.id ?? crypto.randomUUID();
     const newEdge: WorkflowEdge = { ...edge, id: edgeId };
-    board.graph.edges.push(newEdge);
-
-    this.setGraph(boardId, board.graph);
+    const nextGraph: WorkflowGraph = {
+      ...board.graph,
+      edges: [...board.graph.edges, newEdge],
+    };
+    this.setGraph(boardId, nextGraph);
     return newEdge;
   }
 
@@ -270,11 +300,13 @@ export class BoardManager {
     const board = this.boards.get(boardId);
     if (!board || !board.graph) return false;
 
-    const idx = board.graph.edges.findIndex((e) => e.id === edgeId);
-    if (idx === -1) return false;
+    if (!board.graph.edges.some((e) => e.id === edgeId)) return false;
 
-    board.graph.edges.splice(idx, 1);
-    this.setGraph(boardId, board.graph);
+    const nextGraph: WorkflowGraph = {
+      ...board.graph,
+      edges: board.graph.edges.filter((e) => e.id !== edgeId),
+    };
+    this.setGraph(boardId, nextGraph);
     return true;
   }
 }

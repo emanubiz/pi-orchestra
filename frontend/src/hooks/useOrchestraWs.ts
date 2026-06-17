@@ -16,6 +16,7 @@ export function useOrchestraWs(activeBoardId: string) {
     setNodeStatus,
     setNodeError,
     clearNodeError,
+    setEnforcement,
     appendChat,
     appendStream,
     flushStream,
@@ -100,6 +101,9 @@ export function useOrchestraWs(activeBoardId: string) {
               msg.cols as number,
               msg.rows as number,
             );
+            break;
+          case "enforcement":
+            setEnforcement(boardId, msg.nodeId as string, msg.enabled !== false);
             break;
           case "pty_exit":
             emitPtyExit(`${boardId}:${msg.nodeId as string}`, (msg.code as number) ?? 0);

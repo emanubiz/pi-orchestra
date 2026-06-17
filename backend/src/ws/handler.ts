@@ -56,6 +56,11 @@ function handleMessage(ws: WebSocket, msg: Record<string, unknown>): void {
         break;
       }
       ptyHub.setGraph(boardId, graph, cwd);
+      // Sync any per-node determinism-watchdog overrides so the card toggles
+      // reflect them after a (re)connect. Nodes not listed use the default (on).
+      for (const o of ptyHub.enforcementOverrides(boardId)) {
+        ws.send(JSON.stringify({ type: "enforcement", boardId, nodeId: o.nodeId, enabled: o.enabled }));
+      }
       break;
     }
 
@@ -96,6 +101,11 @@ function handleMessage(ws: WebSocket, msg: Record<string, unknown>): void {
 
     case "track_kanban": {
       ptyHub.setKanbanTracked(boardId);
+      break;
+    }
+
+    case "set_enforcement": {
+      ptyHub.setEnforcement(boardId, nodeId, msg.enabled !== false);
       break;
     }
 
