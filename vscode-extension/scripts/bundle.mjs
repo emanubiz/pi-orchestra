@@ -38,10 +38,13 @@ const EXCLUDE = new Set(["@earendil-works/pi-coding-agent"]);
 /** Packages with native binaries that need platform-specific filtering. */
 const NATIVE_PKGS = {
   "node-pty": {
+    // Keep the whole build/Release tree: on Windows the runtime needs more than
+    // pty.node (conpty.node, winpty.dll, winpty-agent.exe, the conpty/ folder).
+    // Compilation intermediates are stripped by skipBuildJunk below.
     keep: [
       "package.json",
       "lib/**",
-      "build/Release/pty.node",
+      "build/Release/**",
     ],
     // Only keep linux-x64 prebuild if present (fallback)
     prebuildPlatform: "linux-x64",
@@ -50,10 +53,20 @@ const NATIVE_PKGS = {
     keep: [
       "package.json",
       "lib/**",
-      "build/Release/better_sqlite3.node",
+      "build/Release/**",
     ],
   },
 };
+
+/** Drop compiler intermediates so build/Release/** stays lean across platforms. */
+function skipBuildJunk(src) {
+  const b = path.basename(src);
+  if (b === "obj.target" || b === "obj" || b === ".deps") return false;
+  if (b === "test_extension.node") return false; // better-sqlite3 test fixture
+  // Drop compiler intermediates and link-time-only artifacts (static/import
+  // libs, debug symbols); the runtime only needs the loadable *.node + dlls.
+  return !/\.(o|obj|a|lib|pdb|tlog|lastbuildstate|recipe|ipdb|iobj|exp|ilk)$/i.test(b);
+}
 
 /** Platform we're bundling for (process.platform + process.arch). */
 const BUNDLE_PLATFORM = `${process.platform}-${process.arch}`;
@@ -62,7 +75,13 @@ const log = (m) => console.log(`[bundle] ${m}`);
 
 function run(cmd, args) {
   log(`$ ${cmd} ${args.join(" ")}`);
-  execFileSync(cmd, args, { cwd: repoRoot, stdio: "inherit" });
+  // On Windows `npm` is `npm.cmd`; Node ≥18.20/20.12 refuses to spawn .cmd
+  // without a shell, so enable it there.
+  execFileSync(cmd, args, {
+    cwd: repoRoot,
+    stdio: "inherit",
+    shell: process.platform === "win32",
+  });
 }
 
 function copyDir(src, dest) {
@@ -92,7 +111,11 @@ function copyPkgFiltered(name, src, dest) {
         const srcDir = path.join(srcBase, dir);
         const destDir = path.join(destBase, dir);
         if (fs.existsSync(srcDir)) {
-          fs.cpSync(srcDir, destDir, { recursive: true, dereference: true });
+          fs.cpSync(srcDir, destDir, {
+            recursive: true,
+            dereference: true,
+            filter: skipBuildJunk,
+          });
         }
       } else {
         // Single file
