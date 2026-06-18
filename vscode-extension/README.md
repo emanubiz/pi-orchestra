@@ -82,8 +82,9 @@ code --install-extension pinodes-orchestra-vscode-*.vsix
 ```
 
 When sideloading (vs. Open VSX / Marketplace), pick the VSIX that matches your
-OS/arch (`linux-x64`, `win32-x64`, `darwin-x64`, `darwin-arm64`). The packaged
-extension is self-contained — backend + frontend are bundled under `server/`.
+OS/arch (`linux-x64`, `win32-x64`, `darwin-arm64`). Intel macOS (`darwin-x64`) is
+not currently published (no free Intel macOS CI runner). The packaged extension is
+self-contained — backend + frontend are bundled under `server/`.
 
 ## Settings
 
