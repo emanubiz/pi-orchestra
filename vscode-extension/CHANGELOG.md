@@ -2,6 +2,28 @@
 
 All notable changes to the **PiNodes Orchestra** extension are documented here.
 
+## 0.2.9
+
+### Fixed
+
+- **Windows/macOS: agent nodes stuck on "starting pi"** because the packaged
+  backend shipped without `node-pty`'s native binaries. Recent `node-pty` keeps
+  them under `prebuilds/<platform>/` (prebuildify layout), but the bundler only
+  copied `build/Release` plus a hardcoded `linux-x64` prebuild — so `pty.node`/
+  `conpty.node` were missing everywhere except Linux and spawning `pi` failed
+  silently. The bundler now ships the prebuild for the target platform.
+- **"starting pi…" overlay now behaves consistently across platforms.** It clears
+  when pi has actually booted (its extension reports `session_start`) instead of
+  on the first raw PTY byte — which on Windows is a ConPTY init escape emitted
+  before pi is up, hiding the overlay too early. A fallback timer still reveals
+  the terminal if a node never reports ready.
+
+### Changed
+
+- Graph validation now rejects self-loop edges and edges referencing unknown
+  nodes on **every** graph-edit path (`PUT …/graph` and `/flows`, not just the
+  granular edge endpoint), matching the documented programmatic-API behavior.
+
 ## 0.2.8
 
 ### Fixed
