@@ -84,11 +84,15 @@ Details: [`vscode-extension/README.md`](./vscode-extension/README.md),
 | Variable | Purpose |
 |----------|---------|
 | `PORT` | Port the backend listens on (default 3847) |
+| `PINODES_ORCHESTRA_HOST` | Listen host (default `127.0.0.1`; set `0.0.0.0` only for explicit LAN/remote use) |
+| `PINODES_ORCHESTRA_ALLOWED_ORIGINS` | Comma-separated extra browser origins allowed by CORS and WebSocket Origin checks |
 | `PINODES_ORCHESTRA_URL` | Base URL pi nodes use to call back (default `http://localhost:<port>`) |
 | `PINODES_ORCHESTRA_PORT` | Override only the port in that callback URL (does **not** change the listen port — set `PORT` for that) |
 | `PINODES_ORCHESTRA_DATA_DIR` | SQLite location |
-| `PINODES_ORCHESTRA_TOKEN` | Shared secret for programmatic API auth (optional) |
+| `PINODES_ORCHESTRA_TOKEN` | Optional shared secret for all API/internal routes and WebSocket handshakes (except `/api/health`) |
 | `VITE_API_BASE` | Custom backend URL at frontend build time |
+
+When `PINODES_ORCHESTRA_TOKEN` is set, browser clients must provide it. The VS Code extension passes its `pinodesOrchestra.token` setting automatically; standalone browser use can pass `?token=...` in the URL or store it in `localStorage` as `PINODES_ORCHESTRA_TOKEN`.
 
 ## Documentation
 

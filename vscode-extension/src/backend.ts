@@ -184,6 +184,10 @@ export class BackendManager {
     // per-user global storage (the install dir is wiped on every update).
     const bundled = entry.startsWith(this.bundledRoot);
     const dataDir = this.context.globalStorageUri.fsPath;
+    const token = vscode.workspace
+      .getConfiguration("pinodesOrchestra")
+      .get<string>("token", "")
+      .trim();
 
     this.setStatus("starting");
     this.log(`Starting backend: ${nodeCmd} ${entry}`);
@@ -200,6 +204,7 @@ export class BackendManager {
         PINODES_ORCHESTRA_PARENT_PID: String(process.pid),
         // Packaged: persist the DB outside the (volatile) extension install dir.
         ...(bundled ? { PINODES_ORCHESTRA_DATA_DIR: dataDir } : {}),
+        ...(token ? { PINODES_ORCHESTRA_TOKEN: token } : {}),
       },
     });
     this.external = false;

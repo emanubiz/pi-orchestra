@@ -1,6 +1,6 @@
 import { Plus, X } from "lucide-react";
 import { useBoardStore } from "../stores/boardStore";
-import { api } from "../lib/api";
+import { apiFetch } from "../lib/api";
 
 interface BoardTabsProps {
   onBoardSwitch: (boardId: string) => void;
@@ -17,7 +17,7 @@ export function BoardTabs({ onBoardSwitch }: BoardTabsProps) {
     const fallback = useBoardStore.getState().defaultCwd ?? ".";
     const path = window.prompt("Folder / repo path:", fallback);
     if (!path?.trim()) return;
-    const res = await fetch(api("/api/validate-path"), {
+    const res = await apiFetch("/api/validate-path", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: path.trim() }),

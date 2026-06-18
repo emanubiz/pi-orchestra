@@ -107,7 +107,7 @@ Valid columns: `todo`, `in_progress`, `test`, `review`, `done`.
 | Orchestration | Node.js + `node-pty` + pi CLI + `BoardManager` |
 | Handoff hook | pi extension (`call-agent.ts`) |
 | Storage | SQLite (`better-sqlite3`) — prompts, workflows, boards |
-| Auth (optional) | `PINODES_ORCHESTRA_TOKEN` — shared-secret for programmatic API |
+| Auth (optional) | `PINODES_ORCHESTRA_TOKEN` — shared-secret for API/internal routes and WebSocket handshakes |
 
 ## Project layout
 
@@ -201,11 +201,13 @@ See [docs/PROGRAMMATIC_API.md](./docs/PROGRAMMATIC_API.md) for the full programm
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `PORT` | `3847` | Backend listen port |
+| `PINODES_ORCHESTRA_HOST` | `127.0.0.1` | Backend listen host; use `0.0.0.0` only for explicit LAN/remote access |
+| `PINODES_ORCHESTRA_ALLOWED_ORIGINS` | loopback + Vite dev origins | Extra comma-separated browser origins allowed by CORS and WebSocket Origin checks |
 | `PINODES_ORCHESTRA_URL` | `http://localhost:<port>` | Callback URL injected into pi nodes |
 | `PINODES_ORCHESTRA_PORT` | `PORT` | Overrides only the port in that callback URL — **not** the listen port |
 | `PINODES_ORCHESTRA_ROOT` | repo root | Bundled prompts location |
 | `PINODES_ORCHESTRA_DATA_DIR` | `<root>/data` | SQLite database directory |
-| `PINODES_ORCHESTRA_TOKEN` | (empty — no auth) | Shared secret for programmatic API auth |
+| `PINODES_ORCHESTRA_TOKEN` | (empty — no auth) | Optional shared secret for all API/internal routes and WebSocket handshakes except `/api/health`; standalone browser clients pass it with `?token=...` or `localStorage.PINODES_ORCHESTRA_TOKEN` |
 | `PINODES_ORCHESTRA_MAX_STEER_RETRIES` | `2` | Confirm retries before a non-final node that won't hand off is marked `error` |
 | `PINODES_ORCHESTRA_ENFORCE` | `true` | Default for the per-node determinism watchdog (`false` = off everywhere unless re-enabled per node) |
 | `VITE_API_BASE` | (empty) | Frontend build-time backend URL |

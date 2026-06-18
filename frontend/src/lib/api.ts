@@ -25,18 +25,62 @@ function resolveBase(): string {
 
 export const API_BASE = resolveBase();
 
+/** Optional shared secret — only when PINODES_ORCHESTRA_TOKEN is configured server-side. */
+export function resolveAuthToken(): string | undefined {
+  if (typeof window === "undefined") return undefined;
+  const runtime = (window as { __PINODES_ORCHESTRA_TOKEN__?: string }).__PINODES_ORCHESTRA_TOKEN__;
+  if (runtime?.trim()) return runtime.trim();
+  try {
+    const fromUrl = new URLSearchParams(window.location.search).get("token")?.trim();
+    if (fromUrl) return fromUrl;
+  } catch {
+    /* ignore */
+  }
+  try {
+    const stored = window.localStorage.getItem("PINODES_ORCHESTRA_TOKEN")?.trim();
+    if (stored) return stored;
+  } catch {
+    /* ignore */
+  }
+  return undefined;
+}
+
+function authHeaders(): Record<string, string> {
+  const token = resolveAuthToken();
+  return token ? { "X-PiNodes-Orchestra-Token": token } : {};
+}
+
 /** Build an absolute (or proxied-relative) URL for a backend path. */
 export function api(path: string): string {
   return `${API_BASE}${path}`;
 }
 
+/** fetch() with optional auth header when a token is available. */
+export function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+  const headers = new Headers(init?.headers);
+  for (const [k, v] of Object.entries(authHeaders())) {
+    headers.set(k, v);
+  }
+  return fetch(api(path), { ...init, headers });
+}
+
 /** WebSocket URL for the backend. */
 export function wsUrl(): string {
+  let url: string;
   if (API_BASE) {
     const base = API_BASE.replace(/^http/, "ws");
-    return `${base}/ws`;
+    url = `${base}/ws`;
+  } else if (import.meta.env.DEV) {
+    url = "ws://localhost:3847/ws";
+  } else {
+    const proto = window.location.protocol === "https:" ? "wss" : "ws";
+    url = `${proto}://${window.location.host}/ws`;
   }
-  if (import.meta.env.DEV) return "ws://localhost:3847/ws";
-  const proto = window.location.protocol === "https:" ? "wss" : "ws";
-  return `${proto}://${window.location.host}/ws`;
+  const token = resolveAuthToken();
+  if (!token) return url;
+  const parsed = new URL(url, window.location.href);
+  parsed.searchParams.set("token", token);
+  return url.startsWith("ws://") || url.startsWith("wss://")
+    ? parsed.toString()
+    : `${parsed.pathname}${parsed.search}${parsed.hash}`;
 }

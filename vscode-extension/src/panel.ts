@@ -89,6 +89,11 @@ export class OrchestraPanel {
     url.searchParams.set("embed", "vscode");
     const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (folder) url.searchParams.set("cwd", folder);
+    const token = vscode.workspace
+      .getConfiguration("pinodesOrchestra")
+      .get<string>("token", "")
+      .trim();
+    if (token) url.searchParams.set("token", token);
     this.panel.webview.html = renderHtml(this.panel.webview, url.toString());
   }
 

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { FolderOpen } from "lucide-react";
-import { api } from "../lib/api";
+import { apiFetch } from "../lib/api";
 import type { SavedWorkflowListItem, WorkflowGraph } from "../types";
 
 interface WorkflowPickerProps {
@@ -16,7 +16,7 @@ export function WorkflowPicker({ cwd, currentId, onLoad, compact }: WorkflowPick
   const rootRef = useRef<HTMLDivElement>(null);
 
   const refresh = async () => {
-    const res = await fetch(api("/api/workflows"));
+    const res = await apiFetch("/api/workflows");
     setWorkflows((await res.json()) as SavedWorkflowListItem[]);
   };
 
@@ -41,7 +41,7 @@ export function WorkflowPicker({ cwd, currentId, onLoad, compact }: WorkflowPick
   }, [open]);
 
   const load = async (id: string) => {
-    const res = await fetch(api(`/api/workflows/${id}`));
+    const res = await apiFetch(`/api/workflows/${id}`);
     if (!res.ok) return;
     const graph = (await res.json()) as WorkflowGraph;
     onLoad({ ...graph, cwd: graph.cwd ?? cwd });

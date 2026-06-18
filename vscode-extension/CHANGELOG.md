@@ -2,6 +2,48 @@
 
 All notable changes to the **PiNodes Orchestra** extension are documented here.
 
+## 0.2.14
+
+### Security
+
+- **Backend binds to `127.0.0.1` by default** (was `0.0.0.0`). Eliminates
+  exposure on LAN/WiFi interfaces. Set `PINODES_ORCHESTRA_HOST=0.0.0.0` to
+  re-enable LAN/remote access explicitly.
+- **WebSocket handshake checks `Origin`** — a web page from another origin
+  can no longer open `ws://localhost:3847/ws` and write into pi terminals
+  (Cross-Site WebSocket Hijacking → RCE via the `bash` tool). Disallowed
+  origins are closed with code `4001`.
+- **CORS restricted to loopback + Vite dev origins.** Extra origins via
+  `PINODES_ORCHESTRA_ALLOWED_ORIGINS` (CSV).
+- **`PINODES_ORCHESTRA_TOKEN`, when set, now protects every `/api/*` and
+  `/internal/*` route (except `/api/health`) plus the WebSocket handshake
+  via `?token=…`.** Previously only `/api/v1/orchestra/*` was gated — the
+  WS and `/internal/*` paths were unauthenticated even with a token
+  configured. The token is propagated to each pi PTY env so the
+  `call-agent.ts` extension can still call back. Browser clients pass the
+  token via `?token=…` in the URL or `localStorage.PINODES_ORCHESTRA_TOKEN`;
+  the VS Code extension injects it from the `pinodesOrchestra.token`
+  setting.
+
+### Fixed
+
+- **`load_graph` with a stale `cwd` is now rejected** (WS `error` to the
+  client) instead of silently falling back to `process.cwd()`, which
+  spawned pi in the backend's directory. `PtyHub.setGraph` is the single
+  validation choke point; `PtyHub.spawn` no longer re-falls-back. On
+  backend restart, boards whose persisted `cwd` no longer exists are
+  skipped with a log line instead of spawning pi in the wrong place.
+- **`runFromHere` (frontend) now uses `inject_task` (ready-gated)** instead
+  of raw `pty_input`, which could type a message into a pi terminal that
+  hadn't booted yet and lose it.
+
+### Docs
+
+- `README.md`, `ARCHITECTURE.md`, `docs/PROGRAMMATIC_API.md` updated to
+  reflect the new auth surface (global token, WS handshake, host/origin
+  env vars). New `docs/SECURITY_HARDENING_PLAN.md` documents the threat
+  model, the phases, and what's still outstanding (Phase 2/3/4).
+
 ## 0.2.13
 
 ### Fixed

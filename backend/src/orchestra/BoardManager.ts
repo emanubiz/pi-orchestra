@@ -1,5 +1,3 @@
-import fs from "node:fs";
-import path from "node:path";
 import {
   createBoard as dbCreateBoard,
   deleteBoard as dbDeleteBoard,
@@ -9,6 +7,7 @@ import {
 } from "../db/index.js";
 import type { PtyHub } from "../pty/PtyHub.js";
 import type { BoardState, WorkflowEdge, WorkflowGraph, WorkflowNode } from "../types.js";
+import { resolveBoardCwd, resolveCwd } from "../utils/paths.js";
 
 export interface BoardListItem {
   boardId: string;
@@ -27,17 +26,18 @@ export class BoardManager {
     for (const b of dbListBoards()) {
       this.boards.set(b.boardId, b);
       if (b.graph) {
-        this.ptyHub.setGraph(b.boardId, b.graph, b.graph.cwd || b.cwd);
+        try {
+          const cwd = resolveBoardCwd(b.graph.cwd, b.cwd);
+          this.ptyHub.setGraph(b.boardId, b.graph, cwd);
+        } catch (err) {
+          console.log(
+            "pinodes-orchestra: skip board rehydrate, cwd invalid:",
+            b.boardId,
+            err instanceof Error ? err.message : String(err),
+          );
+        }
       }
     }
-  }
-
-  private resolveCwd(cwd: string): string {
-    const resolved = path.resolve(cwd);
-    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) {
-      throw new Error(`Not a valid directory: ${cwd}`);
-    }
-    return resolved;
   }
 
   private getNode(boardId: string, nodeId: string) {
@@ -51,7 +51,7 @@ export class BoardManager {
   }
 
   create(cwd: string, label?: string): BoardState {
-    const resolved = this.resolveCwd(cwd);
+    const resolved = resolveCwd(cwd);
     const finalLabel = label ?? cwd.split("/").filter(Boolean).pop() ?? "board";
     const boardId = crypto.randomUUID();
     const board = dbCreateBoard(boardId, resolved, finalLabel);
@@ -121,7 +121,7 @@ export class BoardManager {
   setGraph(boardId: string, graph: WorkflowGraph): BoardState {
     const board = this.boards.get(boardId);
     if (!board) throw new Error(`Board not found: ${boardId}`);
-    const cwd = graph.cwd && graph.cwd.trim() ? this.resolveCwd(graph.cwd.trim()) : board.cwd;
+    const cwd = graph.cwd && graph.cwd.trim() ? resolveCwd(graph.cwd.trim()) : board.cwd;
     const graphWithCwd: WorkflowGraph = { ...graph, cwd };
     this.validateGraph(graphWithCwd); // throws before any persistence side effect
     const saved = dbSaveBoardGraph(boardId, graphWithCwd);

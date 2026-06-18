@@ -18,11 +18,19 @@ import {
 import { ptyHub } from "./pty/PtyHub.js";
 import { orchestraRoutes } from "./routes/orchestra.js";
 import type { WorkflowGraph } from "./types.js";
+import {
+  buildAllowedOrigins,
+  checkAuth,
+  routeRequiresAuth,
+  validateWebSocketHandshake,
+} from "./utils/security.js";
 import { attachWebSocket } from "./ws/handler.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "../..");
 const PORT = Number(process.env.PORT ?? 3847);
+const HOST = process.env.PINODES_ORCHESTRA_HOST ?? "127.0.0.1";
+const ALLOWED_ORIGINS = buildAllowedOrigins(PORT);
 
 // When launched by a host (e.g. the VS Code extension) that sets its own PID
 // here, watch it: if that parent process disappears, exit so we never linger
@@ -40,8 +48,21 @@ if (PARENT_PID > 0) {
 
 const app = Fastify({ logger: true });
 
-await app.register(cors, { origin: true });
+await app.register(cors, {
+  origin: (origin, cb) => {
+    // No Origin = same-origin navigation or non-browser tools.
+    if (!origin) return cb(null, true);
+    if (ALLOWED_ORIGINS.has(origin)) return cb(null, true);
+    cb(null, false);
+  },
+});
 await app.register(websocket);
+
+app.addHook("preHandler", async (req, reply) => {
+  const pathOnly = req.url.split("?")[0] ?? req.url;
+  if (!routeRequiresAuth(pathOnly)) return;
+  if (!checkAuth(req, reply)) return reply;
+});
 
 app.get("/api/health", async () => ({
   ok: true,
@@ -177,7 +198,12 @@ app.delete<{ Params: { id: string } }>("/api/workflows/:id", async (req, reply) 
 await app.register(orchestraRoutes, { prefix: "/api/v1/orchestra" });
 
 app.register(async (f) => {
-  f.get("/ws", { websocket: true }, (socket) => {
+  f.get("/ws", { websocket: true }, (socket, req) => {
+    const handshake = validateWebSocketHandshake(req, ALLOWED_ORIGINS);
+    if (!handshake.ok) {
+      socket.close(handshake.code, handshake.reason);
+      return;
+    }
     attachWebSocket(socket);
   });
 });
@@ -193,14 +219,15 @@ try {
 }
 
 try {
-  await app.listen({ port: PORT, host: "0.0.0.0" });
+  await app.listen({ port: PORT, host: HOST });
 } catch (err) {
   console.error(
-    `pinodes-orchestra: failed to start on port ${PORT} — ${err instanceof Error ? err.message : String(err)}`,
+    `pinodes-orchestra: failed to start on ${HOST}:${PORT} — ${err instanceof Error ? err.message : String(err)}`,
   );
   console.error(
     "Is another process using the port? Try: lsof -i :" + PORT + " or set PORT=… in env.",
   );
   process.exit(1);
 }
-console.log(`pinodes-orchestra backend http://localhost:${PORT}`);
+const listenLabel = HOST === "0.0.0.0" ? "localhost" : HOST;
+console.log(`pinodes-orchestra backend http://${listenLabel}:${PORT}`);

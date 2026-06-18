@@ -2,7 +2,7 @@
   "name": "pinodes-orchestra-vscode",
   "displayName": "PiNodes Orchestra",
   "description": "Visual multi-agent pi console orchestrator inside VS Code — graph canvas, live terminals, visible handoffs.",
-  "version": "0.2.13",
+  "version": "0.2.14",
   "private": false,
   "publisher": "emanubiz",
   "license": "MIT",
@@ -114,6 +114,11 @@
           "type": "boolean",
           "default": true,
           "description": "Automatically start the backend subprocess when the panel opens (if one is not already running)."
+        },
+        "pinodesOrchestra.token": {
+          "type": "string",
+          "default": "",
+          "description": "Optional shared secret (PINODES_ORCHESTRA_TOKEN). Leave empty for normal local use — only needed for remote/LAN deployments."
         }
       }
     }

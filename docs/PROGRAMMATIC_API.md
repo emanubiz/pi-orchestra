@@ -97,8 +97,8 @@ POST /api/validate-path    { path }
 ### Internal (pi extension callbacks)
 
 These are called by `backend/pi-extensions/call-agent.ts` running inside each
-node's pi terminal. Localhost-only, same (no-auth) precedent as the existing
-internal routes.
+node's pi terminal. When `PINODES_ORCHESTRA_TOKEN` is set, they require the same
+auth headers as other routes (the pi extension reads the token from its PTY env).
 
 ```http
 POST /internal/call-agent      { boardId, fromNodeId, targetNodeId, message }
@@ -264,15 +264,21 @@ Standalone localhost deployments can run with no auth (default). For remote embe
 PINODES_ORCHESTRA_TOKEN=<shared-secret>
 ```
 
-When set, every `/api/v1/orchestra/*` request must include one of:
+When set, **all** `/api/*` and `/internal/*` routes require auth, except
+`/api/health` (liveness probe). The WebSocket handshake at `/ws` also requires
+the token via `?token=<shared-secret>` in the URL (browsers cannot set custom
+headers on `WebSocket`). Each request must include one of:
 
 ```http
 X-PiNodes-Orchestra-Token: <shared-secret>
 # or
 Authorization: Bearer <shared-secret>
+# or (WebSocket only)
+ws://localhost:3847/ws?token=<shared-secret>
 ```
 
-Missing or invalid tokens receive `401 Unauthorized`.
+Missing or invalid tokens receive `401 Unauthorized` on REST, or WebSocket close
+code `4002` on the handshake.
 
 ---
 
@@ -300,7 +306,7 @@ Env vars: `PINODES_ORCHESTRA_URL` (default `http://localhost:3847`), `PINODES_OR
 
 ## WebSocket (live control — implemented)
 
-Connect: `ws://localhost:3847/ws`
+Connect: `ws://localhost:3847/ws` (append `?token=…` when `PINODES_ORCHESTRA_TOKEN` is set)
 
 Prefer WebSocket for:
 

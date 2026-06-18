@@ -3,30 +3,8 @@ import { BoardManager } from "../orchestra/BoardManager.js";
 import { ptyHub } from "../pty/PtyHub.js";
 import type { WorkflowEdge, WorkflowGraph, WorkflowNode } from "../types.js";
 
-function checkAuth(req: { headers: Record<string, string | string[] | undefined> }, reply: {
-  code: (code: number) => { send: (payload: unknown) => void };
-}): boolean {
-  const token = process.env.PINODES_ORCHESTRA_TOKEN;
-  if (!token) return true;
-  const header = req.headers["x-pinodes-orchestra-token"];
-  const auth = req.headers.authorization;
-  const bearer = typeof auth === "string" && auth.startsWith("Bearer ") ? auth.slice(7) : undefined;
-  const provided = typeof header === "string" ? header : bearer;
-  if (provided !== token) {
-    reply.code(401).send({ error: "Unauthorized" });
-    return false;
-  }
-  return true;
-}
-
 export function createOrchestraRoutes(boardManager: BoardManager) {
   return async function orchestraRoutes(app: FastifyInstance): Promise<void> {
-    app.addHook("preHandler", async (req, reply) => {
-      if (!checkAuth(req, reply)) {
-        return reply;
-      }
-    });
-
     app.post<{ Body: { cwd: string; label?: string } }>(
       "/boards",
       async (req, reply) => {

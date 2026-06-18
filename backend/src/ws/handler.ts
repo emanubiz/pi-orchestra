@@ -1,8 +1,7 @@
-import fs from "node:fs";
-import path from "node:path";
 import type { WebSocket } from "@fastify/websocket";
 import { ptyHub } from "../pty/PtyHub.js";
 import type { WorkflowGraph } from "../types.js";
+import { resolveCwd } from "../utils/paths.js";
 
 const clients = new Set<WebSocket>();
 
@@ -14,11 +13,6 @@ function broadcast(msg: Record<string, unknown>): void {
 }
 
 ptyHub.setBroadcast(broadcast);
-
-function resolveCwd(cwd: unknown): string {
-  const raw = typeof cwd === "string" && cwd.trim() ? cwd.trim() : process.cwd();
-  return path.resolve(raw);
-}
 
 export function attachWebSocket(ws: WebSocket): void {
   clients.add(ws);
@@ -50,15 +44,7 @@ function handleMessage(ws: WebSocket, msg: Record<string, unknown>): void {
   switch (msg.type) {
     case "load_graph": {
       const graph = msg.graph as WorkflowGraph;
-      let cwd = resolveCwd(msg.cwd ?? graph.cwd);
-      if (!fs.existsSync(cwd)) {
-        // A persisted board may carry a cwd that no longer exists (e.g. the
-        // extension install dir from a previous version, wiped on update).
-        // Rather than rejecting the whole graph and leaving pi unspawned,
-        // fall back to the backend's own cwd (stable, see backend.ts) and log.
-        console.log("pinodes-orchestra: load_graph cwd not found, falling back:", cwd, "->", process.cwd());
-        cwd = path.resolve(process.cwd());
-      }
+      const cwd = resolveCwd(msg.cwd ?? graph.cwd);
       console.log("pinodes-orchestra: load_graph OK, nodes=", graph.nodes?.length, "cwd=", cwd);
       ptyHub.setGraph(boardId, graph, cwd);
       // Sync any per-node determinism-watchdog overrides so the card toggles

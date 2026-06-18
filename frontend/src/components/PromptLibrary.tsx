@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ChevronRight, Plus } from "lucide-react";
-import { api } from "../lib/api";
+import { apiFetch } from "../lib/api";
 import type { SystemPrompt } from "../types";
 
 interface PromptLibraryProps {
@@ -21,7 +21,7 @@ export function PromptLibrary({ prompts, onRefresh, onAddNode }: PromptLibraryPr
     : prompts;
 
   const createPrompt = async () => {
-    await fetch(api("/api/prompts"), {
+    await apiFetch("/api/prompts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, content }),

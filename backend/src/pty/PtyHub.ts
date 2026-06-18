@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import pty, { type IPty } from "node-pty";
 import { getPrompt } from "../db/index.js";
 import type { NodeStatus, WorkflowEdge, WorkflowGraph, WorkflowNode } from "../types.js";
+import { resolveCwd } from "../utils/paths.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MAX_BUFFER = 256_000; // scrollback kept per node for re-attach
@@ -146,8 +147,9 @@ export class PtyHub {
    * the PTY (which pi used to mistake for a new user task).
    */
   setGraph(boardId: string, graph: WorkflowGraph, cwd: string): void {
+    const resolvedCwd = resolveCwd(cwd);
     const nodes = new Map(graph.nodes.map((n) => [n.id, n]));
-    this.graphs.set(boardId, { cwd, nodes, edges: graph.edges ?? [] });
+    this.graphs.set(boardId, { cwd: resolvedCwd, nodes, edges: graph.edges ?? [] });
     for (const k of [...this.sessions.keys()]) {
       const [b, nodeId] = k.split(":");
       if (b === boardId && !nodes.has(nodeId)) this.kill(boardId, nodeId);
@@ -357,7 +359,7 @@ export class PtyHub {
   private spawn(boardId: string, nodeId: string, cols: number, rows: number): void {
     const graph = this.graphs.get(boardId);
     const node = graph?.nodes.get(nodeId);
-    const cwd = graph?.cwd && fs.existsSync(graph.cwd) ? graph.cwd : process.cwd();
+    const cwd = resolveCwd(graph?.cwd ?? process.cwd());
 
     let rolePrompt = "";
     if (node) {
@@ -401,6 +403,9 @@ export class PtyHub {
         PINODES_ORCHESTRA_BOARD: boardId,
         PINODES_ORCHESTRA_NODE: nodeId,
         PINODES_ORCHESTRA_FALLBACK_APPENDIX: appendix,
+        ...(process.env.PINODES_ORCHESTRA_TOKEN
+          ? { PINODES_ORCHESTRA_TOKEN: process.env.PINODES_ORCHESTRA_TOKEN }
+          : {}),
       } as Record<string, string>,
     });
 

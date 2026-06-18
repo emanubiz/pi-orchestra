@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import Fastify from "fastify";
 import { createOrchestraRoutes } from "./orchestra.js";
 import { BoardManager } from "../orchestra/BoardManager.js";
+import { checkAuth, routeRequiresAuth } from "../utils/security.js";
 import type { PtyHub } from "../pty/PtyHub.js";
 import type { BoardState, WorkflowGraph } from "../types.js";
 
@@ -97,6 +98,11 @@ async function buildApp() {
   const ptyHub = makeFakePtyHub();
   const manager = new BoardManager(ptyHub);
   const app = Fastify({ logger: false });
+  app.addHook("preHandler", async (req, reply) => {
+    const pathOnly = req.url.split("?")[0] ?? req.url;
+    if (!routeRequiresAuth(pathOnly)) return;
+    if (!checkAuth(req, reply)) return reply;
+  });
   await app.register(createOrchestraRoutes(manager), { prefix: "/api/v1/orchestra" });
   return { app, manager, ptyHub };
 }

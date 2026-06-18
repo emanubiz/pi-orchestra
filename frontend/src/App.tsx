@@ -13,7 +13,7 @@ import { SystemPromptModal } from "./components/SystemPromptModal";
 import { useOrchestraWs } from "./hooks/useOrchestraWs";
 import { useBoardStore } from "./stores/boardStore";
 import { graphFromFlow, useRuntimeStore } from "./stores/runtimeStore";
-import { api } from "./lib/api";
+import { apiFetch } from "./lib/api";
 import { IS_EMBEDDED, EMBED_CWD } from "./lib/embed";
 import type { SystemPrompt, WorkflowGraph, WorkflowNodeData } from "./types";
 
@@ -57,7 +57,7 @@ export function App() {
       bindWorkspace(EMBED_CWD);
       return;
     }
-    void fetch(api("/api/info"))
+    void apiFetch("/api/info")
       .then((r) => r.json())
       .then((data: { defaultCwd?: string }) => {
         if (data.defaultCwd) setDefaultCwd(data.defaultCwd);
@@ -73,7 +73,7 @@ export function App() {
   }, [activeBoard.id, setActiveBoardId]);
 
   const loadPrompts = useCallback(async () => {
-    const res = await fetch(api("/api/prompts"));
+    const res = await apiFetch("/api/prompts");
     setPrompts((await res.json()) as SystemPrompt[]);
   }, [setPrompts]);
 
@@ -170,7 +170,7 @@ export function App() {
       activeBoard.cwd,
       activeBoard.entryNodeId,
     );
-    const res = await fetch(api("/api/workflows"), {
+    const res = await apiFetch("/api/workflows", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(graph),
@@ -211,9 +211,8 @@ export function App() {
   };
 
   const runFromHere = (nodeId: string, message: string) => {
-    // Make sure the pi terminal exists, then type the message into it.
     send({ type: "attach_node", nodeId });
-    send({ type: "pty_input", nodeId, data: `${message}\r` });
+    send({ type: "inject_task", nodeId, message });
   };
 
   // Kanban → agents: open the linked board and feed the card into its entry node.
