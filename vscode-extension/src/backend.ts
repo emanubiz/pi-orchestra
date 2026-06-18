@@ -1,5 +1,6 @@
 import { ChildProcess, spawn } from "node:child_process";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
 
@@ -49,7 +50,12 @@ export class BackendManager {
   }
 
   get baseUrl(): string {
-    return `http://localhost:${this.port}`;
+    // 127.0.0.1 (not "localhost"): on Windows `localhost` can resolve to ::1
+    // (IPv6) first, while the backend binds 0.0.0.0 (IPv4-only). The first
+    // health-check fetch then hangs on ::1 until the 20s timeout, so the panel
+    // fails on first open and only works after a retry. A literal IPv4 loopback
+    // always reaches the listener.
+    return `http://127.0.0.1:${this.port}`;
   }
 
   showLogs(): void {
@@ -166,7 +172,13 @@ export class BackendManager {
     const nodeCmd = vscode.workspace
       .getConfiguration("pinodesOrchestra")
       .get<string>("nodeCommand", "node");
-    const cwd = this.workspaceCwd() ?? path.dirname(path.dirname(entry));
+    // Spawn the backend with a cwd that is stable across extension updates.
+    // Using the bundled entry's parent dir (the extension's `server/backend`)
+    // is wrong: that path is wiped on every update, so a previously-persisted
+    // board would send a load_graph with a cwd that no longer exists and the
+    // backend would reject it → terminals never spawn. Fall back to the user's
+    // home dir when no workspace folder is open.
+    const cwd = this.workspaceCwd() ?? os.homedir();
 
     // When running the packaged backend, keep its SQLite DB in the extension's
     // per-user global storage (the install dir is wiped on every update).
@@ -220,14 +232,21 @@ export class BackendManager {
     await this.waitForHealth();
   }
 
-  private async waitForHealth(timeoutMs = 20_000): Promise<void> {
+  private async waitForHealth(timeoutMs = 60_000): Promise<void> {
+    // 60s (was 20s): on Windows the first backend boot can take ~20-30s because
+    // Windows Defender scans the native modules (node-pty, better-sqlite3) on
+    // first load. 20s was too tight — the server would come up just after the
+    // timeout expired, so the panel failed on first open and only worked after
+    // a manual retry (by which point the backend was already running).
     const deadline = Date.now() + timeoutMs;
+    let attempt = 0;
     while (Date.now() < deadline) {
       if (this._status === "stopped" || this._status === "error") {
         throw new Error("Backend process exited before becoming healthy. See PiNodes Orchestra logs.");
       }
+      attempt++;
       if (await this.isHealthy()) {
-        this.log(`Backend healthy on ${this.baseUrl}`);
+        this.log(`Backend healthy on ${this.baseUrl} (after ${attempt} check${attempt === 1 ? "" : "s"})`);
         this.setStatus("running");
         return;
       }

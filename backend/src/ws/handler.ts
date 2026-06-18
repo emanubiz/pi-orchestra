@@ -50,11 +50,16 @@ function handleMessage(ws: WebSocket, msg: Record<string, unknown>): void {
   switch (msg.type) {
     case "load_graph": {
       const graph = msg.graph as WorkflowGraph;
-      const cwd = resolveCwd(msg.cwd ?? graph.cwd);
+      let cwd = resolveCwd(msg.cwd ?? graph.cwd);
       if (!fs.existsSync(cwd)) {
-        ws.send(JSON.stringify({ type: "error", boardId, message: `Folder not found: ${cwd}` }));
-        break;
+        // A persisted board may carry a cwd that no longer exists (e.g. the
+        // extension install dir from a previous version, wiped on update).
+        // Rather than rejecting the whole graph and leaving pi unspawned,
+        // fall back to the backend's own cwd (stable, see backend.ts) and log.
+        console.log("pinodes-orchestra: load_graph cwd not found, falling back:", cwd, "->", process.cwd());
+        cwd = path.resolve(process.cwd());
       }
+      console.log("pinodes-orchestra: load_graph OK, nodes=", graph.nodes?.length, "cwd=", cwd);
       ptyHub.setGraph(boardId, graph, cwd);
       // Sync any per-node determinism-watchdog overrides so the card toggles
       // reflect them after a (re)connect. Nodes not listed use the default (on).

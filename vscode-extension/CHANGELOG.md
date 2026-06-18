@@ -2,6 +2,31 @@
 
 All notable changes to the **PiNodes Orchestra** extension are documented here.
 
+## 0.2.11
+
+### Fixed
+
+- **Agent terminals were black after an extension update.** The backend was
+  spawned with the extension's install dir as its cwd (`<extension>/server/
+  backend`), which is wiped on every update. A persisted board carried that
+  stale cwd and sent it back via `load_graph`; the backend rejected it
+  (`Folder not found`) so the graph never synced, `pi` never spawned, and the
+  terminal cards stayed black. The backend is now spawned with the user's
+  home dir (or the open workspace folder) when no workspace is open, and
+  `load_graph` falls back to the backend's own cwd instead of rejecting when
+  the requested cwd no longer exists — so stale persisted boards self-heal.
+- **Panel failed on first open, only worked after a retry.** The health-check
+  timeout was 20s, but on Windows the first backend boot can take ~20–30s
+  (Windows Defender scans the native modules `node-pty`/`better-sqlite3` on
+  first load). The server would come up just after the timeout expired, so
+  the panel reported "Backend did not become healthy within 20s" and only the
+  second click worked (the backend was already running by then). The timeout
+  is now 60s.
+- **Health checks now target `127.0.0.1` instead of `localhost`.** On Windows
+  `localhost` can resolve to `::1` (IPv6) first, while the backend binds
+  `0.0.0.0` (IPv4-only); the first fetch hung on `::1` until timeout. A
+  literal IPv4 loopback always reaches the listener.
+
 ## 0.2.10
 
 ### Docs
