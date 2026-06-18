@@ -84,14 +84,27 @@ export class BoardManager {
   }
 
   /**
-   * Reject a contradictory graph before it is persisted: a node marked
-   * non-final (canBeFinal === false) but with no outgoing edges can neither end
-   * the chain nor hand off — the agent could never satisfy its rule. Every CRUD
-   * path funnels through setGraph, so this single chokepoint covers them all.
+   * Reject a contradictory graph before it is persisted. Every CRUD path funnels
+   * through setGraph, so this single chokepoint covers them all (PUT /graph and
+   * /flows included — not just the granular edge endpoint). Rules:
+   *   - an edge may not be a self-loop (a node handing off to itself);
+   *   - an edge may not reference a node absent from the graph;
+   *   - a node marked non-final (canBeFinal === false) with no outgoing edges can
+   *     neither end the chain nor hand off — the agent could never satisfy its rule.
    */
   private validateGraph(graph: WorkflowGraph): void {
+    const nodeIds = new Set(graph.nodes.map((n) => n.id));
     const outCount = new Map<string, number>();
     for (const e of graph.edges) {
+      if (e.sourceNodeId === e.targetNodeId) {
+        throw new Error(`Self-loop edges are not allowed (node "${e.sourceNodeId}").`);
+      }
+      if (!nodeIds.has(e.sourceNodeId)) {
+        throw new Error(`Edge source node not found in graph: ${e.sourceNodeId}`);
+      }
+      if (!nodeIds.has(e.targetNodeId)) {
+        throw new Error(`Edge target node not found in graph: ${e.targetNodeId}`);
+      }
       outCount.set(e.sourceNodeId, (outCount.get(e.sourceNodeId) ?? 0) + 1);
     }
     for (const n of graph.nodes) {
