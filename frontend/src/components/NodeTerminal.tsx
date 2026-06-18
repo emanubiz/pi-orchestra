@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
-import { onPtyOutput, onPtySize } from "../lib/ptyBus";
+import { onNodeReady, onPtyOutput, onPtySize } from "../lib/ptyBus";
 import { TERM_FONT, TERM_THEME, useTerminalBridge } from "../lib/termTheme";
 import { useRuntimeStore } from "../stores/runtimeStore";
 
@@ -69,9 +69,19 @@ export function NodeTerminal({ nodeId }: { nodeId: string }) {
     const unsubSize = onPtySize(key, applySize);
     const unsub = onPtyOutput(key, (data, replay) => {
       if (replay) term.reset();
-      if (data.length > 0) setLive(true);
       term.write(data, scheduleRescale);
     });
+
+    // Clear the "starting pi…" overlay only once pi has actually booted (its
+    // extension reported session_start → backend `node_ready`). We can't key off
+    // the first PTY byte: on Windows ConPTY emits terminal-init escapes before pi
+    // is up, which would hide the overlay too early — the very inconsistency this
+    // fixes between Linux and Windows.
+    const unsubReady = onNodeReady(key, () => setLive(true));
+    // Safety net: if pi never reports ready (an old pi without session_start, or
+    // the extension failing to load), reveal the terminal anyway so the overlay
+    // can't hang forever. Comfortably above the backend's 10s inject fallback.
+    const readyFallback = window.setTimeout(() => setLive(true), 15_000);
 
     // Boot the node's pi on board load (spawn:true) so cards come alive without
     // opening the side panel — but resize:false keeps the interactive terminal
@@ -86,6 +96,8 @@ export function NodeTerminal({ nodeId }: { nodeId: string }) {
       ro.disconnect();
       unsub();
       unsubSize();
+      unsubReady();
+      window.clearTimeout(readyFallback);
       term.dispose();
       termRef.current = null;
     };

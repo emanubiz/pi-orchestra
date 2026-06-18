@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useRuntimeStore } from "../stores/runtimeStore";
-import { emitPtyExit, emitPtyOutput, emitPtySize } from "../lib/ptyBus";
+import { emitNodeReady, emitPtyExit, emitPtyOutput, emitPtySize } from "../lib/ptyBus";
 import { normalizeColumn, useKanbanStore } from "../stores/kanbanStore";
 import { wsUrl } from "../lib/api";
 
@@ -101,6 +101,9 @@ export function useOrchestraWs(activeBoardId: string) {
               msg.cols as number,
               msg.rows as number,
             );
+            break;
+          case "node_ready":
+            emitNodeReady(`${boardId}:${msg.nodeId as string}`);
             break;
           case "enforcement":
             setEnforcement(boardId, msg.nodeId as string, msg.enabled !== false);

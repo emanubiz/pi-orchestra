@@ -86,6 +86,12 @@ function handleMessage(ws: WebSocket, msg: Record<string, unknown>): void {
           rows: size?.rows,
         }),
       );
+      // If pi already booted before this client attached (e.g. reopening the
+      // panel), tell it so its "starting pi…" overlay clears immediately instead
+      // of waiting for a session_start that already happened.
+      if (ptyHub.isReady(boardId, nodeId)) {
+        ws.send(JSON.stringify({ type: "node_ready", boardId, nodeId }));
+      }
       break;
     }
 

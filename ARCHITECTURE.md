@@ -154,6 +154,7 @@ pinodes-orchestra/
 | `pty_output` | `{ boardId, nodeId, data, replay?, cols?, rows? }` |
 | `pty_size` | `{ boardId, nodeId, cols, rows }` — PTY geometry broadcast (read-only mirrors use this to scale) |
 | `pty_exit` | `{ boardId, nodeId, code }` |
+| `node_ready` | `{ boardId, nodeId }` — pi has booted (reported `session_start`); clients clear the "starting pi…" overlay. Also sent to a late-attaching client if the node is already ready |
 | `card_status` | `{ boardId, column }` |
 | `enforcement` | `{ boardId, nodeId, enabled }` — per-node determinism-watchdog state (UI toggle sync) |
 | `stream` | `{ boardId, nodeId, kind, text }` — structured streaming (relayed from pi agent): `text`, `thinking`, `tool_start`, `tool_end` |

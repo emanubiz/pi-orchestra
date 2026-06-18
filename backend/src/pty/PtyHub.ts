@@ -541,6 +541,11 @@ export class PtyHub {
     const k = key(boardId, nodeId);
     if (!this.sessions.has(k)) return;
     this.ready.set(k, true);
+    // Tell clients pi has actually booted so the "starting pi…" overlay clears at
+    // the right moment on every OS. (Clients can't rely on the first PTY byte:
+    // Windows ConPTY emits terminal-init escape sequences immediately, before pi
+    // is up, which would hide the overlay too early.)
+    this.broadcast({ type: "node_ready", boardId, nodeId });
     const queued = this.waitingInjects.get(k);
     if (queued && queued.length) {
       this.waitingInjects.delete(k);
@@ -549,6 +554,11 @@ export class PtyHub {
         for (const msg of queued) this.inject(boardId, nodeId, msg);
       }, READY_SETTLE_MS);
     }
+  }
+
+  /** Whether a node's pi has booted (reported `session_start`). */
+  isReady(boardId: string, nodeId: string): boolean {
+    return this.ready.has(key(boardId, nodeId));
   }
 
   /**
