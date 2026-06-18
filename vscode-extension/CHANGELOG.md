@@ -2,6 +2,15 @@
 
 All notable changes to the **PiNodes Orchestra** extension are documented here.
 
+## 0.2.10
+
+### Docs
+
+- **Corrected the Node.js requirement to 24.x** (it wrongly said 22+). The
+  published VSIX ships `node-pty`/`better-sqlite3` native binaries built for
+  Node 24 (ABI 137); Node 22 (ABI 127) cannot load them and the backend fails
+  to start. Republished so the Open VSX / Marketplace listing shows the fix.
+
 ## 0.2.9
 
 ### Fixed
