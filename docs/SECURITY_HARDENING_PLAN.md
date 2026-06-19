@@ -5,33 +5,65 @@
 > **how**, **why**, **risk if skipped**, **files touched**, and a **verification**
 > step.
 >
-> **Threat model this plan assumes:** the backend runs locally (or on a LAN)
-> for a single developer. The realistic attacker is **a web page the user
-> visits while the backend is up** — a compromised site, a malicious ad, or a
-> drive-by script — that opens a `WebSocket("ws://localhost:3847/ws")` from the
-> browser and writes into a pi terminal that has the `bash` tool enabled. That
-> is RCE from a web origin the user did not authorise. Secondary risks
-> (filesystem enumeration, prompt/workflow tampering, fake handoffs) flow from
-> the same gap: the backend trusts the local network and the browser's origin.
+> **Threat model:** the backend runs locally (or on a LAN) for a single
+> developer. Nothing here assumes multi-user, internet-exposed deployments
+> (out of scope — see `ARCHITECTURE.md`).
 >
-> Nothing here assumes multi-user, internet-exposed deployments. Those are
-> explicitly out of scope (`ARCHITECTURE.md → Out of scope`).
+> The realistic attacker is **a web page the user visits while the backend is
+> up** — a compromised site, a malicious ad, or a drive-by script — that opens
+> a `WebSocket("ws://localhost:3847/ws")` from the browser and writes into a
+> pi terminal that has the `bash` tool enabled. That is RCE from a web origin
+> the user did not authorise. Secondary risks (filesystem enumeration,
+> prompt/workflow tampering, fake handoffs) flow from the same gap.
+>
+> ### What protects what (honest assessment)
+>
+> | Layer | What it stops | What it does NOT stop |
+> |-------|--------------|----------------------|
+> | **Bind `127.0.0.1`** (default) | Remote machines on LAN/WiFi reaching the backend | Other local processes on the same machine (they all see `127.0.0.1`) |
+> | **CORS Origin allowlist** | Cross-origin browser fetches from malicious sites (`evil.com` → `/api/validate-path`, `/api/prompts`, etc.) | Same-origin requests; requests from extensions with `host_permissions`; `curl` / non-browser tools |
+> | **WebSocket Origin check** | Cross-site WebSocket hijacking (CSWSH) from malicious pages | Same-origin WS connections; non-browser tools that don't send `Origin` |
+> | **`PINODES_ORCHESTRA_TOKEN`** (opt-in) | All of the above + other local processes + browser extensions (when set) | Nothing on its own — it only adds value if the secret is NOT readable by the attacker |
+> | **Ephemeral token in VS Code extension** (automatic) | Other local processes connecting to `:3847` while the panel is open; malicious browser extensions | Processes that can read the extension host's memory (unlikely in practice) |
+>
+> ### Why a persisted default token doesn't help
+>
+> A token auto-generated and written to a file (e.g. `data/auth-token`) is
+> readable by any process with the same user permissions. A secret that both
+> the legitimate client and the attacker can read from the same source is not
+> a secret — it adds friction against naïve scanners but not against a real
+> local attacker. Worse, a local process that wants to run arbitrary commands
+> can already do `pi -- bash "rm -rf ~"` directly — the backend is an
+> alternative path, not a new attack surface.
+>
+> ### Where an ephemeral token DOES help: the VS Code extension
+>
+> The extension host is a **trusted intermediary** that can generate a secret
+> the webview knows but other local processes cannot easily discover:
+> - `BackendManager` generates `crypto.randomUUID()` at construction time
+> - Passes it as `PINODES_ORCHESTRA_TOKEN` env var to the backend subprocess
+> - Passes it as `?token=` in the webview iframe URL
+> - Ephemeral (changes on each extension activation), zero user config
+> - Protects against "other process connects to `:3847` while the panel is open"
+>
+> This is the one case where a token has real value with zero UX cost.
 
-## Current state (audit summary)
+## Current state (post-Phase 1)
 
 | Surface | Auth | Bind | Origin check | Notes |
 |---------|------|------|--------------|-------|
-| `/api/v1/orchestra/*` (REST) | ✅ `PINODES_ORCHESTRA_TOKEN` | — | — | `routes/orchestra.ts:6` `checkAuth` |
-| `/ws` (WebSocket) | ❌ none | `0.0.0.0` | ❌ none | `index.ts:180`, `handler.ts:23` — **highest risk** |
-| `/api/prompts`, `/api/workflows` | ❌ none | — | — | CRUD senza token |
-| `/api/validate-path` | ❌ none | — | — | enumeration filesystem |
-| `/internal/*` (call-agent, ready, handoff-failed, orchestra-context) | ❌ none | — | — | il pi-extension li chiama da localhost; ma qualsiasi client esterno può imitarli |
-| CORS | `origin: true` (riflette tutto) | — | — | `index.ts:43` |
+| `/api/v1/orchestra/*` (REST) | ✅ global `preHandler` | `127.0.0.1` | — | `index.ts` global hook |
+| `/ws` (WebSocket) | ✅ `?token=` on handshake | `127.0.0.1` | ✅ Origin allowlist | `security.ts:validateWebSocketHandshake` |
+| `/api/prompts`, `/api/workflows`, `/api/validate-path` | ✅ global `preHandler` | `127.0.0.1` | — | Same global hook |
+| `/api/health` | ❌ exempt (liveness probe) | `127.0.0.1` | — | Used by extension health-check |
+| `/internal/*` (call-agent, ready, etc.) | ✅ global `preHandler` | `127.0.0.1` | — | pi-extension reads token from PTY env |
+| CORS | ✅ Origin allowlist | — | — | `index.ts` with `buildAllowedOrigins()` |
+| VS Code extension | ✅ ephemeral auto-token | `127.0.0.1` | — | `crypto.randomUUID()` if user hasn't configured one |
 
-Le tre condizioni che rendono l'attacco realistico:
-1. `app.listen({ host: "0.0.0.0" })` — reachable da qualsiasi interfaccia, localhost incluso.
-2. `cors({ origin: true })` — fetch REST da qualsiasi origine.
-3. WS senza né auth né check `Origin` — un sito apre il socket e scrive.
+The three conditions that made the original attack realistic are now closed:
+1. ~~`0.0.0.0`~~ → `127.0.0.1` by default (opt-in `PINODES_ORCHESTRA_HOST=0.0.0.0`)
+2. ~~`cors({ origin: true })`~~ → Origin allowlist
+3. ~~WS without auth or Origin check~~ → both in place
 
 ---
 
@@ -206,6 +238,38 @@ REST. È la **P0 assoluta** perché è RCE di fatto via il tool `bash` di pi.
 - **Verify:** con nodo non ancora spawnato, "Run from here" → messaggio
   appare dopo che pi ha booted, non prima.
 
+### 1.7 Ephemeral auto-token in VS Code extension — ✅ implemented
+
+- **What:** when the user has not configured `pinodesOrchestra.token`, the VS Code
+  extension auto-generates an ephemeral `crypto.randomUUID()` at construction time
+  and passes it as `PINODES_ORCHESTRA_TOKEN` to the backend subprocess and as
+  `?token=` in the webview iframe URL. This protects against other local processes
+  or malicious browser extensions connecting to `:3847` while the panel is open,
+  without requiring any user configuration.
+- **How:**
+  - `resolveSessionToken(configured)` in `vscode-extension/src/sessionToken.ts`:
+    returns configured value (trimmed) or generates `crypto.randomUUID()`.
+  - `BackendManager` calls `resolveSessionToken()` in constructor, stores result
+    as `readonly sessionToken`.
+  - `spawnBackend()` always passes `PINODES_ORCHESTRA_TOKEN: this.sessionToken`
+    in the subprocess env (no longer conditional).
+  - `OrchestraPanel.render()` always sets `?token=` in the iframe URL using
+    `this.backend.sessionToken` (no longer re-reads from config).
+- **Why:** the extension host is a trusted intermediary that can generate a secret
+  the webview knows but other local processes cannot easily discover. A persisted
+  token on disk would be readable by any process with the same user permissions
+  (see *Threat model → Why a persisted default token doesn't help*). An ephemeral
+  in-memory token has real security value with zero UX cost.
+- **Risk if skipped:** other local processes (malicious npm scripts, browser
+  extensions with `host_permissions`) could connect to the backend and inject
+  commands while the panel is open.
+- **Files:** `vscode-extension/src/sessionToken.ts` (new, pure function + tests),
+  `vscode-extension/src/backend.ts` (uses `resolveSessionToken`),
+  `vscode-extension/src/panel.ts` (passes token in iframe URL).
+- **Verify:** `cd vscode-extension && npx vitest run` → 6 tests pass. Extension
+  launches with no `pinodesOrchestra.token` configured → backend receives
+  `PINODES_ORCHESTRA_TOKEN` in env, webview iframe URL contains `?token=`.
+
 ---
 
 ## Phase 2 — Robustezza del protocollo e determinismo — ❌ open
@@ -290,7 +354,7 @@ REST. È la **P0 assoluta** perché è RCE di fatto via il tool `bash` di pi.
   - `npm ci`
   - `npm test --workspaces --if-present`
   - `npm run build` (backend + frontend)
-  - opz. `npx tsc --noEmit -p vscode-extension` (l'estensione non ha test)
+  - `npx tsc --noEmit -p vscode-extension` + `cd vscode-extension && npx vitest run`
 - **Why:** oggi solo `publish-extension.yml` (build VSIX su tag). Nessun gate
   su PR. Un commit che rompe test o tipi passa inosservato fino al release.
 - **Risk if skipped:** regressioni su main, scoperte tardivamente.

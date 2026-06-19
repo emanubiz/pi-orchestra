@@ -51,7 +51,7 @@ function authHeaders(): Record<string, string> {
 }
 
 /** Build an absolute (or proxied-relative) URL for a backend path. */
-export function api(path: string): string {
+function api(path: string): string {
   return `${API_BASE}${path}`;
 }
 

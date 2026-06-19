@@ -1,3 +1,16 @@
+## Verify (pre-commit checks)
+
+```bash
+npm test --workspaces --if-present   # all unit tests (backend + frontend + vscode-extension)
+npx tsc --noEmit -p backend          # typecheck backend
+npx tsc --noEmit -p frontend         # typecheck frontend
+npx tsc --noEmit -p vscode-extension # typecheck extension
+npm run build                        # full build (backend + frontend)
+cd vscode-extension && npx vitest run # extension tests only
+```
+
+---
+
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 

@@ -96,6 +96,20 @@ self-contained — backend + frontend are bundled under `server/`.
 | `pinodesOrchestra.nodeCommand` | `node` | Node runtime used to launch the backend. |
 | `pinodesOrchestra.backendEntry` | _(auto)_ | Absolute path to `backend/dist/index.js`. Empty = resolve relative to the extension. |
 | `pinodesOrchestra.autoStartBackend` | `true` | Start the backend when the panel opens if none is running. |
+| `pinodesOrchestra.token` | _(auto)_ | Optional shared secret (`PINODES_ORCHESTRA_TOKEN`). Leave empty for normal local use — only needed for remote/LAN deployments. **When empty, the extension auto-generates an ephemeral token per session** so that the backend is always protected against other local processes or browser extensions connecting to `:3847`. |
+
+### Ephemeral auto-token
+
+When `pinodesOrchestra.token` is not configured, the extension generates a random UUID (`crypto.randomUUID()`) at startup and uses it as the auth token for the session. This token is:
+
+- Passed as `PINODES_ORCHESTRA_TOKEN` env var to the backend subprocess
+- Passed as `?token=` in the webview iframe URL
+- **Ephemeral** — changes on every extension activation (never persisted to disk)
+- **Zero config** — the user doesn't need to set anything
+
+This protects against other local processes (malicious npm scripts, browser extensions with `host_permissions`) connecting to the backend while the panel is open. The extension host acts as a trusted intermediary that knows the secret and passes it to both the backend and the webview, but other processes on the machine cannot discover it.
+
+See `docs/SECURITY_HARDENING_PLAN.md` for the full threat model.
 
 ## Documentation
 

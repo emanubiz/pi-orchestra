@@ -24,6 +24,17 @@ All notable changes to the **PiNodes Orchestra** extension are documented here.
   token via `?token=…` in the URL or `localStorage.PINODES_ORCHESTRA_TOKEN`;
   the VS Code extension injects it from the `pinodesOrchestra.token`
   setting.
+- **Ephemeral auto-token in the VS Code extension.** When
+  `pinodesOrchestra.token` is not configured, the extension now
+  auto-generates a random UUID (`crypto.randomUUID()`) per session and
+  passes it as `PINODES_ORCHESTRA_TOKEN` to the backend subprocess and
+  `?token=` in the webview iframe URL. This protects against other local
+  processes or malicious browser extensions connecting to `:3847` while the
+  panel is open — zero user config required. The token is ephemeral (changes
+  on each extension activation, never persisted to disk). The extension host
+  acts as a trusted intermediary that knows the secret; other processes
+  cannot discover it. New pure function `resolveSessionToken()` in
+  `sessionToken.ts` with dedicated unit tests (vitest).
 
 ### Fixed
 
@@ -43,6 +54,10 @@ All notable changes to the **PiNodes Orchestra** extension are documented here.
   reflect the new auth surface (global token, WS handshake, host/origin
   env vars). New `docs/SECURITY_HARDENING_PLAN.md` documents the threat
   model, the phases, and what's still outstanding (Phase 2/3/4).
+- `AGENTS.md` updated with pre-commit verify commands (test, typecheck,
+  build) for all workspaces including the extension.
+- `vscode-extension/README.md` updated with `pinodesOrchestra.token`
+  setting and ephemeral auto-token documentation.
 
 ## 0.2.13
 

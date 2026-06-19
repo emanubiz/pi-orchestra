@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
+import { resolveSessionToken } from "./sessionToken.js";
 
 export type BackendStatus = "stopped" | "starting" | "running" | "external" | "error";
 
@@ -33,12 +34,27 @@ export class BackendManager {
   private readonly output: vscode.OutputChannel;
   private readonly onDidChangeEmitter = new vscode.EventEmitter<BackendStatus>();
 
+  /**
+   * Auth token for this session. Uses the user-configured value when present;
+   * otherwise generates an ephemeral random UUID so that every backend spawn
+   * is protected even when the user has not set `pinodesOrchestra.token`.
+   * The extension host is the trusted intermediary that knows this secret —
+   * it passes it down to the backend process (env) and the webview (URL).
+   */
+  readonly sessionToken: string;
+
   /** Fires whenever the backend status changes (drives the control view). */
   readonly onDidChangeStatus = this.onDidChangeEmitter.event;
 
   constructor(private readonly context: vscode.ExtensionContext) {
     this.output = vscode.window.createOutputChannel("PiNodes Orchestra");
     context.subscriptions.push(this.output, this.onDidChangeEmitter);
+
+    const configured = vscode.workspace
+      .getConfiguration("pinodesOrchestra")
+      .get<string>("token", "")
+      .trim();
+    this.sessionToken = resolveSessionToken(configured);
   }
 
   get status(): BackendStatus {
@@ -184,11 +200,6 @@ export class BackendManager {
     // per-user global storage (the install dir is wiped on every update).
     const bundled = entry.startsWith(this.bundledRoot);
     const dataDir = this.context.globalStorageUri.fsPath;
-    const token = vscode.workspace
-      .getConfiguration("pinodesOrchestra")
-      .get<string>("token", "")
-      .trim();
-
     this.setStatus("starting");
     this.log(`Starting backend: ${nodeCmd} ${entry}`);
     this.log(`  cwd:  ${cwd}`);
@@ -204,7 +215,7 @@ export class BackendManager {
         PINODES_ORCHESTRA_PARENT_PID: String(process.pid),
         // Packaged: persist the DB outside the (volatile) extension install dir.
         ...(bundled ? { PINODES_ORCHESTRA_DATA_DIR: dataDir } : {}),
-        ...(token ? { PINODES_ORCHESTRA_TOKEN: token } : {}),
+        PINODES_ORCHESTRA_TOKEN: this.sessionToken,
       },
     });
     this.external = false;

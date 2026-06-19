@@ -258,7 +258,12 @@ curl -s http://localhost:3847/api/v1/orchestra/flows \
 
 ## Auth
 
-Standalone localhost deployments can run with no auth (default). For remote embeds, set the environment variable:
+Standalone localhost deployments can run with no auth (default). The **VS Code
+extension auto-generates an ephemeral token per session** even when none is
+configured — see [`vscode-extension/src/sessionToken.ts`](../vscode-extension/src/sessionToken.ts)
+and `docs/SECURITY_HARDENING_PLAN.md` §1.7.
+
+For remote embeds or programmatic consumers, set the environment variable:
 
 ```bash
 PINODES_ORCHESTRA_TOKEN=<shared-secret>

@@ -127,6 +127,7 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "bundle": "node scripts/bundle.mjs",
+    "test": "vitest run",
     "vscode:prepublish": "npm run compile && npm run bundle",
     "package": "vsce package",
     "package:linux": "vsce package --target linux-x64",
@@ -138,6 +139,7 @@
     "@types/node": "^22.13.10",
     "@types/vscode": "^1.85.0",
     "@vscode/vsce": "^3.2.1",
-    "typescript": "^5.8.2"
+    "typescript": "^5.8.2",
+    "vitest": "^3.2.1"
   }
 }

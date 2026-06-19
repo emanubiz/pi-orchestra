@@ -92,7 +92,7 @@ Details: [`vscode-extension/README.md`](./vscode-extension/README.md),
 | `PINODES_ORCHESTRA_TOKEN` | Optional shared secret for all API/internal routes and WebSocket handshakes (except `/api/health`) |
 | `VITE_API_BASE` | Custom backend URL at frontend build time |
 
-When `PINODES_ORCHESTRA_TOKEN` is set, browser clients must provide it. The VS Code extension passes its `pinodesOrchestra.token` setting automatically; standalone browser use can pass `?token=...` in the URL or store it in `localStorage` as `PINODES_ORCHESTRA_TOKEN`.
+When `PINODES_ORCHESTRA_TOKEN` is set, browser clients must provide it. The VS Code extension passes its `pinodesOrchestra.token` setting automatically; when no token is configured, the extension **auto-generates an ephemeral token per session** so the backend is always protected against other local processes. Standalone browser use can pass `?token=...` in the URL or store it in `localStorage` as `PINODES_ORCHESTRA_TOKEN`.
 
 ## Documentation
 

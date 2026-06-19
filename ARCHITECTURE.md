@@ -107,7 +107,7 @@ Valid columns: `todo`, `in_progress`, `test`, `review`, `done`.
 | Orchestration | Node.js + `node-pty` + pi CLI + `BoardManager` |
 | Handoff hook | pi extension (`call-agent.ts`) |
 | Storage | SQLite (`better-sqlite3`) — prompts, workflows, boards |
-| Auth (optional) | `PINODES_ORCHESTRA_TOKEN` — shared-secret for API/internal routes and WebSocket handshakes |
+| Auth | `PINODES_ORCHESTRA_TOKEN` — shared-secret for API/internal routes and WebSocket handshakes; VS Code extension auto-generates an ephemeral token when none is configured |
 
 ## Project layout
 
@@ -130,6 +130,8 @@ pinodes-orchestra/
 │       ├── ws/handler.ts    # WebSocket protocol (attach, input, resize, graph load…)
 │       ├── routes/orchestra.ts  # /api/v1/orchestra — programmatic board/flow REST API
 │       ├── orchestra/BoardManager.ts  # board state + graph management, bridges db ↔ PtyHub
+│       ├── utils/security.ts    # CORS allowlist, auth token, WS handshake validation
+│       ├── utils/paths.ts      # resolveCwd, resolveBoardCwd (shared path validation)
 │       └── types.ts
 ├── frontend/
 │   └── src/
@@ -141,6 +143,7 @@ pinodes-orchestra/
 │       └── lib/             # api, ptyBus, termTheme, termFit, embed (host-embed flags)
 └── vscode-extension/        # VS Code host: spawns the backend, frames the UI in a webview
     └── src/                 # extension, backend (subprocess mgr), panel (webview), controlView
+                             # sessionToken.ts (ephemeral auto-token), sessionToken.test.ts
 ```
 
 ## WebSocket protocol
@@ -207,7 +210,7 @@ See [docs/PROGRAMMATIC_API.md](./docs/PROGRAMMATIC_API.md) for the full programm
 | `PINODES_ORCHESTRA_PORT` | `PORT` | Overrides only the port in that callback URL — **not** the listen port |
 | `PINODES_ORCHESTRA_ROOT` | repo root | Bundled prompts location |
 | `PINODES_ORCHESTRA_DATA_DIR` | `<root>/data` | SQLite database directory |
-| `PINODES_ORCHESTRA_TOKEN` | (empty — no auth) | Optional shared secret for all API/internal routes and WebSocket handshakes except `/api/health`; standalone browser clients pass it with `?token=...` or `localStorage.PINODES_ORCHESTRA_TOKEN` |
+| `PINODES_ORCHESTRA_TOKEN` | (empty — no auth) | Optional shared secret for all API/internal routes and WebSocket handshakes except `/api/health`; standalone browser clients pass it with `?token=...` or `localStorage.PINODES_ORCHESTRA_TOKEN`. **The VS Code extension auto-generates an ephemeral token per session when this is not set** (see `vscode-extension/src/sessionToken.ts`) |
 | `PINODES_ORCHESTRA_MAX_STEER_RETRIES` | `2` | Confirm retries before a non-final node that won't hand off is marked `error` |
 | `PINODES_ORCHESTRA_ENFORCE` | `true` | Default for the per-node determinism watchdog (`false` = off everywhere unless re-enabled per node) |
 | `VITE_API_BASE` | (empty) | Frontend build-time backend URL |
