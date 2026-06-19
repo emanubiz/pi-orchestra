@@ -2,6 +2,41 @@
 
 All notable changes to the **PiNodes Orchestra** extension are documented here.
 
+## 0.2.15
+
+### Fixed
+
+- **Windows: nodes couldn't see each other (orchestration extension never
+  loaded).** On Windows the `pi` launcher on PATH is the npm batch shim
+  `pi.cmd`. Spawning it forced node-pty through `cmd.exe`, which treats the
+  first CRLF inside our multiline `--system-prompt` as end-of-command:
+  everything after it — including `--extension …call-agent.ts` — was dropped.
+  pi booted as a plain session with **no** orchestration extension, so the
+  per-turn hooks never ran, the connections appendix never reached the model,
+  and agents reported they saw no connected nodes. (Errors were invisible
+  because every callback in `call-agent.ts` swallows network failures.) Linux
+  was unaffected because pi is executed directly, without a shell, so args pass
+  verbatim. `PtyHub.resolvePiCommand()` now detects a `pi.cmd`/`pi.bat` shim,
+  resolves the `cli.js` it wraps, and launches it with `node` directly — no
+  `cmd.exe`, args verbatim, exactly like Linux.
+
+### Other changes since 0.2.14
+
+- Ephemeral per-session auto-token finalized in the extension host (see the
+  0.2.14 *Security* notes); `sessionToken.ts` ships with unit tests.
+- Docs consolidated: the security hardening plan is now reference documentation
+  at [`docs/SECURITY.md`](../docs/SECURITY.md) (threat model, current controls,
+  known limitations) instead of a phased plan; the transient Windows
+  pi-extension bug note was removed now that the fix has shipped.
+
+### Note for maintainers
+
+The published VSIX bundles `node-pty`/`better-sqlite3` native binaries for
+**Node 24 (ABI 137)**. Build the bundle with Node 24 on PATH; a stale local
+`node_modules` built under Node 22 (ABI 131) produces `ERR_DLOPEN_FAILED` at
+backend start. `npm install` (or `npm rebuild better-sqlite3`) under Node 24
+fixes a dev environment.
+
 ## 0.2.14
 
 ### Security
@@ -52,8 +87,8 @@ All notable changes to the **PiNodes Orchestra** extension are documented here.
 
 - `README.md`, `ARCHITECTURE.md`, `docs/PROGRAMMATIC_API.md` updated to
   reflect the new auth surface (global token, WS handshake, host/origin
-  env vars). New `docs/SECURITY_HARDENING_PLAN.md` documents the threat
-  model, the phases, and what's still outstanding (Phase 2/3/4).
+  env vars). Security threat model and controls documented in
+  `docs/SECURITY.md`.
 - `AGENTS.md` updated with pre-commit verify commands (test, typecheck,
   build) for all workspaces including the extension.
 - `vscode-extension/README.md` updated with `pinodesOrchestra.token`

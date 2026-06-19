@@ -261,7 +261,7 @@ curl -s http://localhost:3847/api/v1/orchestra/flows \
 Standalone localhost deployments can run with no auth (default). The **VS Code
 extension auto-generates an ephemeral token per session** even when none is
 configured — see [`vscode-extension/src/sessionToken.ts`](../vscode-extension/src/sessionToken.ts)
-and `docs/SECURITY_HARDENING_PLAN.md` §1.7.
+and [`docs/SECURITY.md`](./SECURITY.md).
 
 For remote embeds or programmatic consumers, set the environment variable:
 

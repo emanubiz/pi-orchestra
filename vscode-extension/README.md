@@ -109,7 +109,7 @@ When `pinodesOrchestra.token` is not configured, the extension generates a rando
 
 This protects against other local processes (malicious npm scripts, browser extensions with `host_permissions`) connecting to the backend while the panel is open. The extension host acts as a trusted intermediary that knows the secret and passes it to both the backend and the webview, but other processes on the machine cannot discover it.
 
-See `docs/SECURITY_HARDENING_PLAN.md` for the full threat model.
+See [`docs/SECURITY.md`](../docs/SECURITY.md) for the full threat model and current controls.
 
 ## Documentation
 

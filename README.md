@@ -99,6 +99,7 @@ When `PINODES_ORCHESTRA_TOKEN` is set, browser clients must provide it. The VS C
 | Doc | Contents |
 |-----|----------|
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Current system design, WS protocol, handoff |
+| [docs/SECURITY.md](./docs/SECURITY.md) | Threat model, current controls, configuration, known limitations |
 | [docs/EXTENSIONS_ROADMAP.md](./docs/EXTENSIONS_ROADMAP.md) | Host integrations — IDE extension (done), Hermes, OpenClaw |
 | [vscode-extension/README.md](./vscode-extension/README.md) | VS Code extension — how it works, build, settings |
 | [docs/HERMES_DESKTOP.md](./docs/HERMES_DESKTOP.md) | Hermes Desktop analysis |
