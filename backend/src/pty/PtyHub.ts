@@ -69,7 +69,29 @@ function resolvePiCommand(): { file: string; baseArgs: string[] } {
     if (fs.existsSync(c)) return { file: process.execPath, baseArgs: [c] };
   }
   const piBin = findInPath(PI_BIN_NAMES);
-  if (piBin) return { file: piBin, baseArgs: [] };
+  if (piBin) {
+    // On Windows `pi` on PATH is the npm batch shim `pi.cmd`. Spawning it forces
+    // node-pty through cmd.exe, which treats the first CRLF inside our multiline
+    // `--system-prompt` as end-of-command: it truncates the line and drops every
+    // argument after it — including `--extension …call-agent.ts`. pi then boots
+    // as a plain session with no orchestration extension and the nodes never see
+    // each other. Resolve the cli.js the shim itself runs and launch it with node
+    // directly (no shell), so args pass verbatim exactly like on Linux.
+    if (/\.(cmd|bat)$/i.test(piBin)) {
+      const cliFromShim = path.join(
+        path.dirname(piBin),
+        "node_modules",
+        "@earendil-works",
+        "pi-coding-agent",
+        "dist",
+        "cli.js",
+      );
+      if (fs.existsSync(cliFromShim)) {
+        return { file: process.execPath, baseArgs: [cliFromShim] };
+      }
+    }
+    return { file: piBin, baseArgs: [] };
+  }
   console.error(
     "pinodes-orchestra: pi CLI not found. Install `@earendil-works/pi-coding-agent` globally (npm i -g) " +
       "or run `npm install` in the `backend` folder.",
