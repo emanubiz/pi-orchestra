@@ -15,6 +15,8 @@ interface RuntimeState {
   /** `boardId:nodeId` → determinism watchdog enabled (default true when absent). */
   enforcement: Record<string, boolean>;
   selectedNodeId: string | null;
+  /** Node whose terminal is expanded full-screen, or null. */
+  overlayNodeId: string | null;
   prompts: SystemPrompt[];
   runPromptDraft: string;
 
@@ -22,6 +24,7 @@ interface RuntimeState {
   setEnforcement: (boardId: string, nodeId: string, enabled: boolean) => void;
   setActiveBoardId: (boardId: string) => void;
   setSelectedNodeId: (id: string | null) => void;
+  setOverlayNodeId: (id: string | null) => void;
   setPrompts: (p: SystemPrompt[]) => void;
   setRunPromptDraft: (v: string) => void;
   setNodeStatus: (boardId: string, nodeId: string, status: NodeStatus) => void;
@@ -42,14 +45,17 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
   nodeError: {},
   enforcement: {},
   selectedNodeId: null,
+  overlayNodeId: null,
   prompts: [],
   runPromptDraft: "",
 
   setConnected: (v) => set({ connected: v }),
   setEnforcement: (boardId, nodeId, enabled) =>
     set((s) => ({ enforcement: { ...s.enforcement, [nodeKey(boardId, nodeId)]: enabled } })),
-  setActiveBoardId: (boardId) => set({ activeBoardId: boardId, selectedNodeId: null }),
+  setActiveBoardId: (boardId) =>
+    set({ activeBoardId: boardId, selectedNodeId: null, overlayNodeId: null }),
   setSelectedNodeId: (id) => set({ selectedNodeId: id }),
+  setOverlayNodeId: (id) => set({ overlayNodeId: id }),
   setPrompts: (p) => set({ prompts: p }),
   setRunPromptDraft: (v) => set({ runPromptDraft: v }),
 

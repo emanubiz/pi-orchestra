@@ -142,7 +142,7 @@ pinodes-orchestra/
 │       │                    # KanbanBoard, PromptLibrary, WorkflowPicker, NodeInspector,
 │       │                    # SystemPromptModal, BoardTabs
 │       ├── stores/          # boardStore, runtimeStore, kanbanStore (zustand)
-│       ├── hooks/           # useOrchestraWs
+│       ├── hooks/           # useOrchestraWs, usePiRestartState
 │       └── lib/             # api, ptyBus, termTheme, termFit, embed (host-embed flags)
 └── vscode-extension/        # VS Code host: spawns the backend, frames the UI in a webview
     └── src/                 # extension, backend (subprocess mgr), panel (webview), controlView

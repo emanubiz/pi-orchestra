@@ -4,6 +4,8 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { onPtyExit, onPtyOutput } from "../lib/ptyBus";
+import { confirmPiRestart, usePiRestartState } from "../hooks/usePiRestartState";
+import { useRuntimeStore } from "../stores/runtimeStore";
 import { TERM_FONT, TERM_THEME } from "../lib/termTheme";
 import { fitWhenReady } from "../lib/termFit";
 import { attachClipboard } from "../lib/termClipboard";
@@ -19,6 +21,8 @@ interface TerminalOverlayProps {
 /** Full-screen interactive pi terminal for a single node. */
 export function TerminalOverlay({ boardId, nodeId, label, send, onClose }: TerminalOverlayProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const status = useRuntimeStore((s) => s.nodeStatus[`${boardId}:${nodeId}`]);
+  const [restarting, setRestarting] = usePiRestartState(boardId, nodeId);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -92,10 +96,20 @@ export function TerminalOverlay({ boardId, nodeId, label, send, onClose }: Termi
           <div className="flex items-center gap-1.5">
             <button
               type="button"
-              onClick={() => send({ type: "restart_node", nodeId })}
-              className="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-zinc-300 hover:bg-white/10"
+              disabled={restarting}
+              onClick={() => {
+                if (restarting) return;
+                if (!confirmPiRestart({ label, running: status === "running" })) return;
+                setRestarting(true);
+                send({ type: "restart_node", nodeId });
+              }}
+              className={`flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-md border transition-colors ${
+                restarting
+                  ? "bg-amber-500/10 border-amber-500/20 text-amber-400/80 animate-pulse cursor-not-allowed"
+                  : "bg-white/5 border-white/10 text-zinc-300 hover:bg-white/10"
+              }`}
             >
-              <RotateCw size={11} strokeWidth={2} />
+              <RotateCw size={11} strokeWidth={2} className={restarting ? "animate-spin" : ""} />
               Restart
             </button>
             <button

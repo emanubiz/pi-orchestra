@@ -2,6 +2,44 @@
 
 All notable changes to the **PiNodes Orchestra** extension are documented here.
 
+## 0.2.17
+
+### Fixed
+
+- **Node deletion now shows an in-app confirmation dialog** instead of relying on
+  `window.confirm()`, which is silently blocked in VS Code webviews (always
+  returning `false`). Clicking the trash icon on a node card, or pressing
+  `Backspace`/`Delete` with a node selected, now pops a small inline dialog with
+  **Cancel** and **Delete** buttons. If the node is currently running, the dialog
+  warns before deleting.
+- **Backspace/Delete no longer bypassed the confirmation.** ReactFlow has a
+  built-in keyboard handler that fired `onNodesChange({type:"remove"})` before
+  the custom `keydown` listener, deleting nodes immediately without any
+  confirmation. `deleteKeyCode={null}` is now set on the ReactFlow component to
+  disable that built-in behaviour; the sole delete path is the guarded handler
+  that shows the dialog.
+
+### Added
+
+- **Restart button on agent node cards.** Each node card header now has a
+  `⟳` (refresh) icon that restarts the pi session for that specific node —
+  previously only accessible from the full-screen terminal overlay and the side
+  terminal panel. Includes a visual `animate-spin` / `animate-pulse` state while
+  the restart is in progress, and a "restarting pi…" overlay on the embedded
+  mini-terminal.
+- **`overlayNodeId` in the runtime store.** The "which terminal is expanded
+  full-screen" state moved from `App.tsx` local `useState` into `runtimeStore`,
+  so `FlowCanvas` can read it directly to guard the keyboard delete shortcut
+  (Backspace typed inside a full-screen terminal must not delete the node).
+  Board switches now also clear `overlayNodeId`.
+
+### Tests
+
+- `FlowCanvas.test.tsx` rewritten: all four delete-confirmation scenarios covered
+  (trash button → dialog → confirm; trash button → dialog → cancel;
+  Delete key → dialog → confirm; Backspace blocked while overlay is open).
+  No more `window.confirm` spy — tests interact with the React dialog buttons.
+
 ## 0.2.16
 
 ### Added

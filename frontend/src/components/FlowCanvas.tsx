@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
   Background,
@@ -97,6 +97,7 @@ export function FlowCanvas({
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<WorkflowNodeData>>(initial.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initial.edges);
+  const [pendingDelete, setPendingDelete] = useState<{ nodeId: string; label: string; running: boolean } | null>(null);
   const nodeStatusMap = useRuntimeStore((s) => s.nodeStatus);
   const nodeErrorMap = useRuntimeStore((s) => s.nodeError);
   const selectedNodeId = useRuntimeStore((s) => s.selectedNodeId);
@@ -169,15 +170,29 @@ export function FlowCanvas({
     [boardId, nodeStatusMap, setEdges],
   );
 
-  const onDeleteNode = useCallback(
+  const doDeleteNode = useCallback(
     (nodeId: string) => {
+      if (useRuntimeStore.getState().overlayNodeId === nodeId) {
+        useRuntimeStore.getState().setOverlayNodeId(null);
+      }
       setNodes((nds) => nds.filter((n) => n.id !== nodeId));
       setEdges((eds) =>
         eds.filter((ed) => ed.source !== nodeId && ed.target !== nodeId),
       );
       if (selectedNodeId === nodeId) setSelectedNodeId(null);
+      setPendingDelete(null);
     },
     [setNodes, setEdges, selectedNodeId, setSelectedNodeId],
+  );
+
+  const onDeleteNode = useCallback(
+    (nodeId: string) => {
+      const node = nodes.find((n) => n.id === nodeId);
+      const label = node?.data.label ?? nodeId;
+      const running = nodeStatusMap[`${boardId}:${nodeId}`] === "running";
+      setPendingDelete({ nodeId, label, running });
+    },
+    [nodes, nodeStatusMap, boardId],
   );
 
   // Flip canBeFinal. The graph-change effect above re-syncs to the backend, so a
@@ -200,22 +215,48 @@ export function FlowCanvas({
       if ((e.key === "Delete" || e.key === "Backspace") && selectedNodeId) {
         const t = e.target as HTMLElement;
         if (t.tagName === "INPUT" || t.tagName === "TEXTAREA") return;
-        setNodes((nds) => nds.filter((n) => n.id !== selectedNodeId));
-        setEdges((eds) =>
-          eds.filter((ed) => ed.source !== selectedNodeId && ed.target !== selectedNodeId),
-        );
-        setSelectedNodeId(null);
+        // Never delete via keyboard while a terminal is expanded full-screen:
+        // Backspace there belongs to the terminal, not the canvas.
+        if (useRuntimeStore.getState().overlayNodeId) return;
+        onDeleteNode(selectedNodeId);
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [selectedNodeId, setNodes, setEdges, setSelectedNodeId]);
+  }, [selectedNodeId, onDeleteNode]);
 
   return (
     <TerminalContext.Provider
       value={{ boardId, send, onExpand, onDelete: onDeleteNode, onEditPrompt, onToggleFinal }}
     >
-    <div className="h-full w-full">
+    <div className="relative h-full w-full">
+      {pendingDelete && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="flex flex-col gap-3 rounded-lg border border-zinc-700/60 bg-zinc-900 p-5 shadow-xl w-[300px]">
+            <p className="text-sm text-zinc-200">
+              {pendingDelete.running
+                ? <>Node <span className="font-semibold text-white">"{pendingDelete.label}"</span> is running. Delete it anyway?</>
+                : <>Delete node <span className="font-semibold text-white">"{pendingDelete.label}"</span>?</>}
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                className="rounded px-3 py-1.5 text-xs text-zinc-300 hover:bg-white/5 transition-colors"
+                onClick={() => setPendingDelete(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="rounded bg-red-600/80 px-3 py-1.5 text-xs text-white hover:bg-red-500 transition-colors"
+                onClick={() => doDeleteNode(pendingDelete.nodeId)}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -226,6 +267,7 @@ export function FlowCanvas({
         onPaneClick={() => setSelectedNodeId(null)}
         nodeTypes={nodeTypes}
         defaultEdgeOptions={{ animated: false, style: { stroke: IDLE_EDGE_STROKE } }}
+        deleteKeyCode={null}
         fitView
         proOptions={{ hideAttribution: true }}
       >

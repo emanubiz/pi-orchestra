@@ -20,7 +20,8 @@ import type { SystemPrompt, WorkflowGraph, WorkflowNodeData } from "./types";
 export function App() {
   const flowRef = useRef<FlowCanvasHandle | null>(null);
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [overlayNodeId, setOverlayNodeId] = useState<string | null>(null);
+  const overlayNodeId = useRuntimeStore((s) => s.overlayNodeId);
+  const setOverlayNodeId = useRuntimeStore((s) => s.setOverlayNodeId);
   const [promptEditNodeId, setPromptEditNodeId] = useState<string | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
   const [view, setView] = useState<"agents" | "kanban">("agents");

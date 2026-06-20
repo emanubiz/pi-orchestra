@@ -1,9 +1,10 @@
 import { memo } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { Flag, FlagOff, Maximize2, ScrollText, ShieldCheck, ShieldOff, Trash2 } from "lucide-react";
+import { Flag, FlagOff, Maximize2, RefreshCw, ScrollText, ShieldCheck, ShieldOff, Trash2 } from "lucide-react";
 import type { WorkflowNodeData, NodeStatus } from "../types";
 import { NodeTerminal } from "./NodeTerminal";
 import { useTerminalBridge } from "../lib/termTheme";
+import { confirmPiRestart, usePiRestartState } from "../hooks/usePiRestartState";
 import { useRuntimeStore } from "../stores/runtimeStore";
 
 // Header dot — the precise, canonical status channel.
@@ -25,6 +26,7 @@ const statusBar: Record<NodeStatus, string> = {
 function AgentNodeComponent({ id, data, selected }: NodeProps & { data: WorkflowNodeData }) {
   const status = data.status ?? "idle";
   const { onExpand, onDelete, onEditPrompt, onToggleFinal, boardId, send } = useTerminalBridge();
+  const [restarting, setRestarting] = usePiRestartState(boardId, id);
   // Undefined === can end (preserves old graphs); only an explicit false forces a hand-off.
   const canBeFinal = data.canBeFinal !== false;
   // Determinism watchdog for this node (default on; toggled live for free chat).
@@ -138,6 +140,29 @@ function AgentNodeComponent({ id, data, selected }: NodeProps & { data: Workflow
         </button>
         <button
           type="button"
+          className={`nodrag shrink-0 rounded p-0.5 transition-colors ${
+            restarting
+              ? "text-amber-400/80 animate-pulse"
+              : "text-zinc-500 hover:bg-white/5 hover:text-zinc-200"
+          }`}
+          title={restarting ? "Restarting pi…" : "Restart pi (pick up config/extension changes)"}
+          disabled={restarting}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (restarting) return;
+            if (!confirmPiRestart({ label: data.label ?? id, running: status === "running" })) return;
+            setRestarting(true);
+            send({ type: "restart_node", nodeId: id });
+          }}
+        >
+          <RefreshCw
+            size={12}
+            strokeWidth={2}
+            className={restarting ? "animate-spin" : ""}
+          />
+        </button>
+        <button
+          type="button"
           className="nodrag shrink-0 rounded p-0.5 text-zinc-500 transition-colors hover:bg-red-500/10 hover:text-red-400"
           title="Delete node"
           onClick={(e) => {
@@ -157,7 +182,7 @@ function AgentNodeComponent({ id, data, selected }: NodeProps & { data: Workflow
 
       {/* live mini pi terminal */}
       <div className="h-[150px] bg-black">
-        <NodeTerminal nodeId={id} />
+        <NodeTerminal nodeId={id} restarting={restarting} />
       </div>
 
       <Handle
