@@ -1,33 +1,18 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import pty, { type IPty } from "node-pty";
-import type { INodeRuntime, RuntimeSpawnConfig } from "./INodeRuntime.js";
+import pty from "node-pty";
+import { findInPath } from "./findInPath.js";
+import type { RuntimeSpawnConfig } from "./INodeRuntime.js";
+import { PtyRuntime } from "./PtyRuntime.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const EXTENSION_PATH = path.resolve(__dirname, "../../../pi-extensions/call-agent.ts");
-
-/** Gap between bracketed paste and submit (\r), so the TUI can process the paste. */
-const INJECT_SUBMIT_MS = 80;
 
 // On Windows the `pi` launcher is `pi.cmd` (npm shim); `pi` with no extension
 // does not exist, so spawning it verbatim fails with ENOENT.
 const PI_BIN_NAMES =
   process.platform === "win32" ? ["pi.cmd", "pi.exe", "pi.bat", "pi"] : ["pi"];
-
-/** Search an executable in PATH, trying platform-specific extensions. */
-function findInPath(names: string[]): string | undefined {
-  const pathVar = process.env.PATH ?? "";
-  for (const dir of pathVar.split(path.delimiter)) {
-    for (const name of names) {
-      const candidate = path.join(dir, name);
-      if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
-        return candidate;
-      }
-    }
-  }
-  return undefined;
-}
 
 /** Resolve the `pi` CLI entry, falling back to the binary on PATH. */
 function resolvePiCommand(): { file: string; baseArgs: string[] } {
@@ -75,11 +60,7 @@ function resolvePiCommand(): { file: string; baseArgs: string[] } {
   return { file: PI_BIN_NAMES[0], baseArgs: [] };
 }
 
-export class PiRuntime implements INodeRuntime {
-  private ptyInstance: IPty | null = null;
-  private _cols = 80;
-  private _rows = 24;
-  private _ready = false;
+export class PiRuntime extends PtyRuntime {
   private cmd = resolvePiCommand();
 
   spawn(config: RuntimeSpawnConfig): void {
@@ -131,47 +112,5 @@ export class PiRuntime implements INodeRuntime {
       this._ready = false;
       config.onExit(exitCode ?? null);
     });
-  }
-
-  write(data: string): void {
-    this.ptyInstance?.write(data);
-  }
-
-  inject(message: string): void {
-    if (!this.ptyInstance) return;
-    // Bracketed paste keeps embedded newlines from submitting early.
-    this.ptyInstance.write(`\x1b[200~${message}\x1b[201~`);
-    setTimeout(() => this.ptyInstance?.write("\r"), INJECT_SUBMIT_MS);
-  }
-
-  resize(cols: number, rows: number): void {
-    if (!this.ptyInstance || !cols || !rows) return;
-    this._cols = cols;
-    this._rows = rows;
-    this.ptyInstance.resize(cols, rows);
-  }
-
-  kill(): void {
-    if (!this.ptyInstance) return;
-    this.ptyInstance.kill();
-    this.ptyInstance = null;
-    this._ready = false;
-  }
-
-  markReady(): void {
-    if (!this.ptyInstance) return;
-    this._ready = true;
-  }
-
-  isRunning(): boolean {
-    return this.ptyInstance !== null;
-  }
-
-  isReady(): boolean {
-    return this._ready;
-  }
-
-  size(): { cols: number; rows: number } | undefined {
-    return this.ptyInstance ? { cols: this._cols, rows: this._rows } : undefined;
   }
 }
