@@ -1,13 +1,10 @@
 import { EventEmitter } from "node:events";
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import pty, { type IPty } from "node-pty";
 import { getPrompt } from "../db/index.js";
 import type { NodeStatus, WorkflowEdge, WorkflowGraph, WorkflowNode } from "../types.js";
 import { resolveCwd } from "../utils/paths.js";
+import type { INodeRuntime } from "./runtime/INodeRuntime.js";
+import { PiRuntime } from "./runtime/PiRuntime.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MAX_BUFFER = 256_000; // scrollback kept per node for re-attach
 // After pi reports `session_start` we give its TUI a brief moment to mount the
 // input line before pasting, so the first task can't race the initial render.
@@ -23,7 +20,6 @@ const PORT = Number(
 );
 const BASE_URL =
   process.env.PINODES_ORCHESTRA_URL ?? `http://localhost:${PORT}`;
-const EXTENSION_PATH = path.resolve(__dirname, "../../pi-extensions/call-agent.ts");
 
 type BroadcastFn = (msg: Record<string, unknown>) => void;
 
@@ -34,69 +30,9 @@ interface BoardGraph {
 }
 
 interface Session {
-  pty: IPty;
+  runtime: INodeRuntime;
   buffer: string;
-  cols: number;
-  rows: number;
   startedAt: number;
-}
-
-// On Windows the `pi` launcher is `pi.cmd` (npm shim); `pi` with no extension
-// does not exist, so spawning it verbatim fails with ENOENT.
-const PI_BIN_NAMES = process.platform === "win32" ? ["pi.cmd", "pi.exe", "pi.bat", "pi"] : ["pi"];
-
-/** Search an executable in PATH, trying platform-specific extensions. */
-function findInPath(names: string[]): string | undefined {
-  const pathVar = process.env.PATH ?? "";
-  for (const dir of pathVar.split(path.delimiter)) {
-    for (const name of names) {
-      const candidate = path.join(dir, name);
-      if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
-        return candidate;
-      }
-    }
-  }
-  return undefined;
-}
-
-/** Resolve the `pi` CLI entry, falling back to the binary on PATH. */
-function resolvePiCommand(): { file: string; baseArgs: string[] } {
-  const candidates = [
-    path.resolve(__dirname, "../../node_modules/@earendil-works/pi-coding-agent/dist/cli.js"),
-    path.resolve(process.cwd(), "node_modules/@earendil-works/pi-coding-agent/dist/cli.js"),
-  ];
-  for (const c of candidates) {
-    if (fs.existsSync(c)) return { file: process.execPath, baseArgs: [c] };
-  }
-  const piBin = findInPath(PI_BIN_NAMES);
-  if (piBin) {
-    // On Windows `pi` on PATH is the npm batch shim `pi.cmd`. Spawning it forces
-    // node-pty through cmd.exe, which treats the first CRLF inside our multiline
-    // `--system-prompt` as end-of-command: it truncates the line and drops every
-    // argument after it — including `--extension …call-agent.ts`. pi then boots
-    // as a plain session with no orchestration extension and the nodes never see
-    // each other. Resolve the cli.js the shim itself runs and launch it with node
-    // directly (no shell), so args pass verbatim exactly like on Linux.
-    if (/\.(cmd|bat)$/i.test(piBin)) {
-      const cliFromShim = path.join(
-        path.dirname(piBin),
-        "node_modules",
-        "@earendil-works",
-        "pi-coding-agent",
-        "dist",
-        "cli.js",
-      );
-      if (fs.existsSync(cliFromShim)) {
-        return { file: process.execPath, baseArgs: [cliFromShim] };
-      }
-    }
-    return { file: piBin, baseArgs: [] };
-  }
-  console.error(
-    "pinodes-orchestra: pi CLI not found. Install `@earendil-works/pi-coding-agent` globally (npm i -g) " +
-      "or run `npm install` in the `backend` folder.",
-  );
-  return { file: PI_BIN_NAMES[0], baseArgs: [] };
 }
 
 function key(boardId: string, nodeId: string): string {
@@ -120,7 +56,6 @@ export class PtyHub {
   // Toggled live so the user can chat freely with one node without being asked
   // "handoff or done?", while the rest of the board stays enforced.
   private enforceOverride = new Map<string, boolean>();
-  private cmd = resolvePiCommand();
   private events = new EventEmitter();
 
   setBroadcast(fn: BroadcastFn): void {
@@ -341,7 +276,7 @@ export class PtyHub {
   }
 
   /**
-   * Return a node's scrollback, spawning its pi terminal if needed.
+   * Return a node's scrollback, spawning its terminal if needed.
    * With spawnIfMissing=false it only mirrors an already-running session (used
    * by the read-only mini terminals so they never spawn a pi before the board's
    * graph — hence the right prompt/cwd — has reached the backend).
@@ -362,8 +297,11 @@ export class PtyHub {
       // did, the PTY width would no longer match the interactive xterm and pi's
       // input line would wrap on every keystroke. Mirrors may still *spawn* a
       // node (spawnIfMissing) without claiming resize authority (allowResize).
-      if (allowResize && cols && rows && (cols !== existing.cols || rows !== existing.rows)) {
-        this.resize(boardId, nodeId, cols, rows);
+      if (allowResize && cols && rows) {
+        const sz = existing.runtime.size();
+        if (sz && (cols !== sz.cols || rows !== sz.rows)) {
+          this.resize(boardId, nodeId, cols, rows);
+        }
       }
       return existing.buffer;
     }
@@ -397,73 +335,56 @@ export class PtyHub {
     const appendix =
       this.connectionsAppendix(boardId, nodeId) +
       (this.kanbanBoards.has(boardId) ? this.kanbanAppendix() : "");
-    const hasExtension = fs.existsSync(EXTENSION_PATH);
-    const systemPrompt = (hasExtension ? rolePrompt : rolePrompt + appendix).trim();
 
-    const args = [
-      ...this.cmd.baseArgs,
-      "--tools",
-      "read,bash,edit,write,grep",
-      "--session-id",
-      `${boardId}-${nodeId}`.replace(/[^a-zA-Z0-9-]/g, ""),
-      "--name",
-      node?.label ?? "pi",
-      "--system-prompt",
-      systemPrompt,
-    ];
-    if (hasExtension) args.push("--extension", EXTENSION_PATH);
+    const runtime = new PiRuntime();
 
-    console.log("pinodes-orchestra: spawning pi", this.cmd.file, args);
-    const term = pty.spawn(this.cmd.file, args, {
-      name: "xterm-256color",
-      cols,
-      rows,
-      cwd,
-      env: {
-        ...process.env,
-        PINODES_ORCHESTRA_URL: BASE_URL,
-        PINODES_ORCHESTRA_BOARD: boardId,
-        PINODES_ORCHESTRA_NODE: nodeId,
-        PINODES_ORCHESTRA_FALLBACK_APPENDIX: appendix,
-        ...(process.env.PINODES_ORCHESTRA_TOKEN
-          ? { PINODES_ORCHESTRA_TOKEN: process.env.PINODES_ORCHESTRA_TOKEN }
-          : {}),
-      } as Record<string, string>,
-    });
-
-    const session: Session = { pty: term, buffer: "", cols, rows, startedAt: Date.now() };
     const k = key(boardId, nodeId);
-    this.sessions.set(k, session);
-    // A fresh session is not yet ready for input; the extension's session_start
-    // will mark it (or the fallback timeout in scheduleInject will).
     this.ready.delete(k);
     this.waitingInjects.delete(k);
+
+    const session: Session = { runtime, buffer: "", startedAt: Date.now() };
+    this.sessions.set(k, session);
+
+    runtime.spawn({
+      boardId,
+      nodeId,
+      label: node?.label ?? "pi",
+      cwd,
+      cols,
+      rows,
+      systemPrompt: rolePrompt,
+      appendix,
+      orchestraUrl: BASE_URL,
+      runtimeConfig: node?.runtimeConfig,
+      onOutput: (data) => {
+        session.buffer = (session.buffer + data).slice(-MAX_BUFFER);
+        this.broadcast({ type: "pty_output", boardId, nodeId, data });
+      },
+      onExit: (exitCode) => {
+        // Only clear if this exact session is still the active one (guards restart).
+        if (this.sessions.get(k) === session) {
+          this.sessions.delete(k);
+          this.ready.delete(k);
+          this.waitingInjects.delete(k);
+        }
+        this.broadcast({ type: "pty_exit", boardId, nodeId, code: exitCode });
+        this.broadcast({ type: "node_status", boardId, nodeId, status: "idle" });
+        this.events.emit(`exit:${boardId}:${nodeId}`, exitCode ?? null);
+      },
+      onReady: () => {
+        // onReady is not auto-triggered by PiRuntime; it comes from markReady.
+      },
+    });
+
     this.broadcast({ type: "node_status", boardId, nodeId, status: "running" });
     // Tell read-only mirrors the PTY's real size so they can render pi's
     // absolute-cursor output faithfully (and scale it down) instead of fitting
     // a narrower grid that would garble it.
     this.broadcast({ type: "pty_size", boardId, nodeId, cols, rows });
-
-    term.onData((data) => {
-      session.buffer = (session.buffer + data).slice(-MAX_BUFFER);
-      this.broadcast({ type: "pty_output", boardId, nodeId, data });
-    });
-
-    term.onExit(({ exitCode }) => {
-      // Only clear if this exact session is still the active one (guards restart).
-      if (this.sessions.get(k) === session) {
-        this.sessions.delete(k);
-        this.ready.delete(k);
-        this.waitingInjects.delete(k);
-      }
-      this.broadcast({ type: "pty_exit", boardId, nodeId, code: exitCode });
-      this.broadcast({ type: "node_status", boardId, nodeId, status: "idle" });
-      this.events.emit(`exit:${boardId}:${nodeId}`, exitCode ?? null);
-    });
   }
 
   input(boardId: string, nodeId: string, data: string): void {
-    this.sessions.get(key(boardId, nodeId))?.pty.write(data);
+    this.sessions.get(key(boardId, nodeId))?.runtime.write(data);
   }
 
   /**
@@ -509,8 +430,8 @@ export class PtyHub {
    * requested recipient against the sender's outgoing neighbours (by id OR name),
    * ensures the target terminal is running, and types the task into it. On
    * failure it tells the sender how to address its agents so the hand-off never
-   * fails silently. Returns immediately; injection happens once the target's pi
-   * is ready.
+   * fails silently. Returns immediately; injection happens once the target's
+   * runtime is ready.
    */
   deliverCall(
     boardId: string,
@@ -566,7 +487,7 @@ export class PtyHub {
   }
 
   /**
-   * Feed a task into a node's pi terminal directly (e.g. launched from a Kanban
+   * Feed a task into a node's terminal directly (e.g. launched from a Kanban
    * card). No edge check — it's a user-initiated start, not an agent hand-off.
    */
   injectTask(boardId: string, nodeId: string, message: string): void {
@@ -574,35 +495,37 @@ export class PtyHub {
   }
 
   /**
-   * Mark a node's pi as booted (its extension reported `session_start`). Flushes
+   * Mark a node's agent as booted (its extension reported `session_start`). Flushes
    * any injects that were queued while it was still spawning.
    */
   markReady(boardId: string, nodeId: string): void {
     const k = key(boardId, nodeId);
-    if (!this.sessions.has(k)) return;
+    const s = this.sessions.get(k);
+    if (!s) return;
+    s.runtime.markReady();
     this.ready.set(k, true);
-    // Tell clients pi has actually booted so the "starting pi…" overlay clears at
+    // Tell clients the agent has actually booted so the "starting…" overlay clears at
     // the right moment on every OS. (Clients can't rely on the first PTY byte:
-    // Windows ConPTY emits terminal-init escape sequences immediately, before pi
-    // is up, which would hide the overlay too early.)
+    // Windows ConPTY emits terminal-init escape sequences immediately, before
+    // the agent is up, which would hide the overlay too early.)
     this.broadcast({ type: "node_ready", boardId, nodeId });
     const queued = this.waitingInjects.get(k);
     if (queued && queued.length) {
       this.waitingInjects.delete(k);
       // Give the TUI a beat to mount its input line before the first paste.
       setTimeout(() => {
-        for (const msg of queued) this.inject(boardId, nodeId, msg);
+        for (const msg of queued) s.runtime.inject(msg);
       }, READY_SETTLE_MS);
     }
   }
 
-  /** Whether a node's pi has booted (reported `session_start`). */
+  /** Whether a node's agent has booted (reported `session_start`). */
   isReady(boardId: string, nodeId: string): boolean {
     return this.ready.has(key(boardId, nodeId));
   }
 
   /**
-   * Ensure the node is running, then inject once its pi is ready. If the node
+   * Ensure the node is running, then inject once its agent is ready. If the node
    * has already reported ready the inject fires immediately; otherwise it is
    * queued and flushed by markReady (or a conservative fallback timeout, so a
    * task is never dropped even if the extension never reports ready).
@@ -619,7 +542,7 @@ export class PtyHub {
       return;
     }
     if (this.ready.has(k)) {
-      this.inject(boardId, nodeId, message);
+      s.runtime.inject(message);
       return;
     }
     // Not ready yet → queue; flushed on markReady or on the fallback timeout.
@@ -631,28 +554,16 @@ export class PtyHub {
       const pending = this.waitingInjects.get(k);
       if (!pending || pending.length === 0) return;
       this.waitingInjects.delete(k);
-      for (const msg of pending) this.inject(boardId, nodeId, msg);
+      for (const msg of pending) this.sessions.get(k)?.runtime.inject(msg);
     }, READY_FALLBACK_MS);
-  }
-
-  /** Type text into a node's pi editor as a bracketed paste, then submit. */
-  private inject(boardId: string, nodeId: string, message: string): void {
-    const s = this.sessions.get(key(boardId, nodeId));
-    if (!s) return;
-    // Bracketed paste keeps embedded newlines from submitting early.
-    s.pty.write(`\x1b[200~${message}\x1b[201~`);
-    setTimeout(() => this.sessions.get(key(boardId, nodeId))?.pty.write("\r"), 80);
   }
 
   resize(boardId: string, nodeId: string, cols: number, rows: number): void {
     const s = this.sessions.get(key(boardId, nodeId));
     if (!s || !cols || !rows) return;
-    s.cols = cols;
-    s.rows = rows;
     try {
-      s.pty.resize(cols, rows);
+      s.runtime.resize(cols, rows);
     } catch (err) {
-      // terminal may have just exited
       console.error(`pinodes-orchestra: pty resize failed for ${boardId}:${nodeId}`, err);
     }
     // Keep read-only mirrors in sync with the new PTY dimensions.
@@ -661,11 +572,10 @@ export class PtyHub {
 
   /** Current PTY dimensions for a node, if it has a running session. */
   size(boardId: string, nodeId: string): { cols: number; rows: number } | undefined {
-    const s = this.sessions.get(key(boardId, nodeId));
-    return s ? { cols: s.cols, rows: s.rows } : undefined;
+    return this.sessions.get(key(boardId, nodeId))?.runtime.size();
   }
 
-  /** Kill and respawn a node's terminal (fresh pi session). */
+  /** Kill and respawn a node's terminal (fresh agent session). */
   restart(boardId: string, nodeId: string, cols: number, rows: number): void {
     this.kill(boardId, nodeId);
     this.spawn(boardId, nodeId, cols || 80, rows || 24);
@@ -679,9 +589,8 @@ export class PtyHub {
     this.ready.delete(k);
     this.waitingInjects.delete(k);
     try {
-      s.pty.kill();
+      s.runtime.kill();
     } catch (err) {
-      // already gone
       console.error(`pinodes-orchestra: pty kill failed for ${boardId}:${nodeId}`, err);
     }
   }
@@ -699,7 +608,7 @@ export class PtyHub {
     }
   }
 
-  /** Whether a node currently has a running pi session. */
+  /** Whether a node currently has a running agent session. */
   isNodeRunning(boardId: string, nodeId: string): boolean {
     return this.sessions.has(key(boardId, nodeId));
   }
@@ -727,7 +636,7 @@ export class PtyHub {
   }
 
   /**
-   * Wait for a node's pi session to exit. Resolves immediately if the node is
+   * Wait for a node's agent session to exit. Resolves immediately if the node is
    * not running. Returns `{ timedOut: true }` if the timeout fires first.
    */
   waitForExit(
