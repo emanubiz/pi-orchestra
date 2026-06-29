@@ -122,6 +122,22 @@ Other quick checks:
   credential; a vault/HSM is overkill.
 - **No WS rate limiting** — single-user local backend, no abuse case.
 
+## Runtime configuration security
+
+Each node carries an optional `runtimeConfig: Record<string, unknown>` field,
+persisted in SQLite (`boards.graph_data`) and broadcast to the browser via
+WebSocket. **Never store secrets in `runtimeConfig`.**
+
+- ✅ Allowed: model name, toolset selection, feature flags, tuning parameters.
+- ❌ Forbidden: API keys, tokens, passwords, or any credential.
+
+Credentials live in the runtime's own config:
+- **pi**: `~/.pi/agent/auth.json` or env vars
+- **hermes**: `~/.hermes/` or `HERMES_API_KEY` env var
+
+This constraint is enforced by convention and documentation, not by the
+serializer — `runtimeConfig` is a generic JSON blob.
+
 ## Known limitations & future hardening
 
 These are not yet implemented. They are robustness/observability improvements

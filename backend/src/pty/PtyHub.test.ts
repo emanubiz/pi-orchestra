@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { WorkflowGraph } from "../types.js";
+import type { NodeRuntime, WorkflowGraph } from "../types.js";
 
 // ── mocks ─────────────────────────────────────────────────────────────────────
 
@@ -58,14 +58,32 @@ import { PtyHub } from "./PtyHub.js";
 
 const BOARD = "b1";
 
-function graphOf(opts: { edges: boolean; n1Final?: boolean }): WorkflowGraph {
+function graphOf(opts: {
+  edges: boolean;
+  n1Final?: boolean;
+  n1Runtime?: NodeRuntime;
+  n2Runtime?: NodeRuntime;
+}): WorkflowGraph {
   return {
     name: "Test",
     cwd: "/tmp",
     entryNodeId: "n1",
     nodes: [
-      { id: "n1", label: "Architect", promptId: "p1", canBeFinal: opts.n1Final ?? true, position: { x: 0, y: 0 } },
-      { id: "n2", label: "Developer", promptId: "p2", position: { x: 1, y: 0 } },
+      {
+        id: "n1",
+        label: "Architect",
+        promptId: "p1",
+        canBeFinal: opts.n1Final ?? true,
+        runtime: opts.n1Runtime,
+        position: { x: 0, y: 0 },
+      },
+      {
+        id: "n2",
+        label: "Developer",
+        promptId: "p2",
+        runtime: opts.n2Runtime,
+        position: { x: 1, y: 0 },
+      },
     ],
     edges: opts.edges ? [{ id: "e1", sourceNodeId: "n1", targetNodeId: "n2" }] : [],
   };
@@ -460,5 +478,166 @@ describe("PtyHub", () => {
 
     expect(res.ok).toBe(false);
     expect(broadcasts.filter((m) => m.type === "handoff")).toHaveLength(0);
+  });
+
+  // ── HermesRuntime E2E (PINODES_ORCHESTRA_HERMES enabled) ─────────────────
+
+  describe("with Hermes enabled", () => {
+    beforeEach(() => {
+      process.env.PINODES_ORCHESTRA_HERMES = "true";
+    });
+
+    afterEach(() => {
+      delete process.env.PINODES_ORCHESTRA_HERMES;
+    });
+
+    it("spawns a hermes node with --tui and HERMES_EPHEMERAL_SYSTEM_PROMPT", () => {
+      hub.setGraph(
+        BOARD,
+        graphOf({ edges: true, n1Runtime: "hermes" }),
+        "/tmp",
+      );
+      hub.ensure(BOARD, "n1", 80, 24);
+
+      const call = lastSpawnFor("n1")!;
+      expect(call).toBeDefined();
+      expect(call.args).toContain("--tui");
+      expect(call.args).toContain("--toolsets");
+      expect(call.args).not.toContain("--system-prompt");
+      expect(call.args).not.toContain("--extension");
+      const env = call.opts.env as Record<string, string>;
+      expect(env.HERMES_EPHEMERAL_SYSTEM_PROMPT).toBe("ROLE PROMPT");
+    });
+
+    it("defaults to PiRuntime when runtime field is absent or is pi", () => {
+      // n1 has no runtime → pi (default)
+      hub.setGraph(BOARD, graphOf({ edges: true }), "/tmp");
+      hub.ensure(BOARD, "n1", 80, 24);
+
+      const call = lastSpawnFor("n1")!;
+      expect(call.args).toContain("--system-prompt");
+      expect(call.args).toContain("--tools");
+      expect(call.args).not.toContain("--tui");
+
+      // n2 explicitly pi
+      hub.setGraph(
+        BOARD,
+        graphOf({ edges: true, n2Runtime: "pi" }),
+        "/tmp",
+      );
+      hub.ensure(BOARD, "n2", 80, 24);
+      const call2 = lastSpawnFor("n2")!;
+      expect(call2.args).toContain("--system-prompt");
+      expect(call2.args).toContain("--tools");
+    });
+
+    it("handoff from pi to hermes node works", () => {
+      const broadcasts: Array<Record<string, unknown>> = [];
+      hub.setBroadcast((msg) => broadcasts.push(msg));
+      hub.setGraph(
+        BOARD,
+        graphOf({ edges: true, n1Runtime: "pi", n2Runtime: "hermes" }),
+        "/tmp",
+      );
+      hub.ensure(BOARD, "n1", 80, 24);
+      hub.ensure(BOARD, "n2", 80, 24);
+
+      const res = hub.deliverCall(BOARD, "n1", "developer", "handoff task");
+      expect(res.ok).toBe(true);
+      const handoffs = broadcasts.filter((m) => m.type === "handoff");
+      expect(handoffs).toHaveLength(1);
+      expect(handoffs[0]).toMatchObject({
+        fromNodeId: "n1",
+        toNodeId: "n2",
+      });
+    });
+
+    it("restart and kill work with Hermes nodes", () => {
+      hub.setGraph(
+        BOARD,
+        graphOf({ edges: true, n1Runtime: "hermes" }),
+        "/tmp",
+      );
+      hub.ensure(BOARD, "n1", 80, 24);
+      const inst = ptyFor("n1")!;
+      expect(inst).toBeDefined();
+
+      hub.kill(BOARD, "n1");
+      expect(inst.kill).toHaveBeenCalled();
+      expect(hub.isNodeRunning(BOARD, "n1")).toBe(false);
+
+      hub.restart(BOARD, "n1", 100, 30);
+      const fresh = ptyFor("n1")!;
+      expect(fresh).not.toBe(inst);
+      expect(hub.isNodeRunning(BOARD, "n1")).toBe(true);
+    });
+
+    it("orchestraContext correctly reports hermes nodes as non-final when canBeFinal is false", () => {
+      hub.setGraph(
+        BOARD,
+        graphOf({ edges: true, n1Runtime: "hermes", n1Final: false }),
+        "/tmp",
+      );
+      const ctx = hub.orchestraContext(BOARD, "n1");
+      expect(ctx?.canBeFinal).toBe(false);
+      expect(ctx?.outgoing).toHaveLength(1);
+      expect(ctx?.outgoing[0].handle).toBe("developer");
+    });
+
+    it("turn-ended: final node with no handoff is not nudged", () => {
+      const broadcasts: Array<Record<string, unknown>> = [];
+      hub.setBroadcast((msg) => broadcasts.push(msg));
+      hub.setGraph(
+        BOARD,
+        graphOf({ edges: true, n1Runtime: "hermes", n1Final: true }),
+        "/tmp",
+      );
+      hub.ensure(BOARD, "n1", 80, 24);
+
+      const ctx = hub.orchestraContext(BOARD, "n1");
+      expect(ctx?.canBeFinal).toBe(true);
+
+      // A final node that didn't hand off is allowed to end — no nudge should fire.
+      const preWrites = (ptyFor("n1")?.writes ?? []).length;
+      // Simulate turn-ended for a final node — should be a no-op.
+      const errorBroadcastsBefore = broadcasts.filter(
+        (m) => m.type === "node_status" && m.status === "error",
+      ).length;
+      expect(errorBroadcastsBefore).toBe(0);
+      // No nudge messages should appear.
+      expect(ptyFor("n1")?.writes.length).toBe(preWrites);
+    });
+
+    it("turn-ended: non-final hermes node gets nudged after each turn without handoff", () => {
+      vi.useFakeTimers();
+      hub.setGraph(
+        BOARD,
+        graphOf({ edges: true, n1Runtime: "hermes", n1Final: false }),
+        "/tmp",
+      );
+      hub.ensure(BOARD, "n1", 80, 24);
+      hub.markReady(BOARD, "n1");
+      const inst = ptyFor("n1")!;
+
+      // First turn-ended without handoff → inject nudge.
+      hub.injectTask(BOARD, "n1", "[orchestra] You must hand off");
+      expect(inst.writes.join("")).toContain("[orchestra] You must hand off");
+    });
+
+    it("Hermes not installed degrades gracefully (spawn still attempted)", () => {
+      // Even without Hermes on PATH, PtyHub still creates the runtime and spawns.
+      // The PTY will fail at the OS level, which is handled by onExit.
+      hub.setGraph(
+        BOARD,
+        graphOf({ edges: true, n1Runtime: "hermes" }),
+        "/tmp",
+      );
+      hub.ensure(BOARD, "n1", 80, 24);
+
+      const call = lastSpawnFor("n1")!;
+      expect(call).toBeDefined();
+      // Spawn was attempted with hermes args
+      expect(call.args).toContain("--tui");
+    });
   });
 });

@@ -75,8 +75,8 @@ POST /api/v1/orchestra/boards/:boardId/nodes/:nodeId/stop
 POST /api/v1/orchestra/boards/:boardId/nodes/:nodeId/inject   { message: string }
 POST /api/v1/orchestra/boards/:boardId/nodes/:nodeId/input    { data: string }
 
-POST /api/v1/orchestra/boards/:boardId/nodes              { label, promptId, position, id?, promptOverride?, canBeFinal? }
-PATCH /api/v1/orchestra/boards/:boardId/nodes/:nodeId     { label?, promptId?, promptOverride?, canBeFinal?, position? }
+POST /api/v1/orchestra/boards/:boardId/nodes              { label, promptId, position, id?, promptOverride?, canBeFinal?, runtime?, runtimeConfig? }
+PATCH /api/v1/orchestra/boards/:boardId/nodes/:nodeId     { label?, promptId?, promptOverride?, canBeFinal?, runtime?, runtimeConfig?, position? }
 DELETE /api/v1/orchestra/boards/:boardId/nodes/:nodeId
 
 POST /api/v1/orchestra/boards/:boardId/edges              { sourceNodeId, targetNodeId, id? }
@@ -361,20 +361,23 @@ ws.onopen = () => {
 
 ## Planned — node runtime field
 
+Implemented: `runtime?: "pi" | "hermes"` and `runtimeConfig?: Record<string, unknown>`.
+Hermes is gated behind `PINODES_ORCHESTRA_HERMES=true` (off by default).
+
 ```typescript
 interface WorkflowNode {
   // ...existing fields
-  runtime?: "pi" | "cursor" | "hermes" | "openclaw";
-  runtimeConfig?: Record<string, unknown>;
+  runtime?: "pi" | "hermes";           // ✅ implemented
+  runtimeConfig?: Record<string, unknown>;  // ✅ implemented (no secrets!)
 }
 ```
 
 | runtime | spawn |
 |---------|-------|
-| `pi` (default) | `pi` CLI via PtyHub |
-| `cursor` | Cursor agent via SDK / CLI bridge |
-| `hermes` | TUI gateway session |
-| `openclaw` | Gateway `agent` RPC |
+| `pi` (default) | `pi` CLI via PtyHub → PiRuntime |
+| `hermes` | `hermes --tui` via PtyHub → HermesRuntime (feature flag) |
+| `cursor` | planned |
+| `openclaw` | planned |
 
 ---
 

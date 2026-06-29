@@ -1,274 +1,143 @@
-# pinodes-orchestra — Architecture
+# Architecture — PiNodes Orchestra
 
-Visual canvas of **pi** agent terminals connected in a graph. Semi-automatic pipeline with human intervention on any node.
+## System overview
 
-## Product thesis
-
-The core value is **not** a chatbot. It is:
-
-- a **visual graph** of running agents
-- **live terminals** embedded in each node (xterm.js)
-- **human-in-the-loop** — type directly into any node's pi session
-- **visible handoffs** — edges light up, output streams in real time
-
-## Core model
-
-- **Board** = one repo folder (`cwd`) + workflow graph + isolated pi sessions
-- **Node** = one pi CLI session with a system prompt (from DB + optional override)
-- **Edge** = permission: source may hand off work to target
-- **Flow** = semi-automatic: starts when a message enters a node; propagates when an agent emits a hand-off block
+PiNodes Orchestra is a web application (React + Fastify + WebSocket + SQLite + PTY)
+that provides a visual canvas of agent consoles. Each node on the canvas is a
+live terminal backed by a real AI agent process (pi or hermes) in a PTY.
 
 ```
-User / Kanban / handoff  →  inject into node terminal
-                                │
-                                ▼
-                           pi CLI (node-pty)
-                                │
-         @@HANDOFF:<handle> … @@END  →  deliverCall()  →  inject into target terminal
+┌─────────────────────┐     WebSocket      ┌──────────────────────┐
+│   Frontend (React)  │ ◄────────────────► │   Backend (Fastify)  │
+│   xterm.js + React  │                    │   /api/v1/orchestra  │
+│   Flow + Kanban     │                    │   /internal/*        │
+└─────────────────────┘                    └────────┬─────────────┘
+                                                    │
+                                          ┌─────────┴─────────┐
+                                          │     PtyHub         │
+                                          │  (runtime-agnostic)│
+                                          └────────┬───────────┘
+                                                   │
+                              ┌────────────────────┼────────────────────┐
+                              │                    │                    │
+                     ┌────────┴────────┐  ┌───────┴────────┐         ...
+                     │   PiRuntime     │  │ HermesRuntime  │
+                     │  (pi CLI + PTY) │  │(hermes --tui    │
+                     │  + call-agent   │  │  + PTY + plugin)│
+                     └─────────────────┘  └────────────────┘
 ```
 
-## Node states
+## Backend layers
 
-| State | Meaning |
-|-------|---------|
-| `idle` | No active pi process (or exited) |
-| `running` | pi terminal alive / working |
-| `done` | Session completed successfully |
-| `error` | Session exited with an error (message propagated to frontend) |
+### PtyHub (`backend/src/pty/PtyHub.ts`)
 
-Status is driven by PTY lifecycle (`spawn` → `running`, `onExit` → `idle` / `done` / `error`). The frontend displays per-node error messages inline on the card when a node enters the `error` state.
+Central orchestrator — runtime-agnostic. Manages:
+- **Graph**: nodes, edges, cwd per board
+- **Sessions**: maps `boardId:nodeId` → `INodeRuntime` instance + scrollback buffer
+- **Orchestration context**: outgoing targets, handles, canBeFinal, enforcement
+- **Inject lifecycle**: ready-gated queue, fallback timeout, markReady
+- **Handoff resolution**: resolves recipients by handle / UUID / partial label
 
-## User intervention
+### INodeRuntime (`backend/src/pty/runtime/INodeRuntime.ts`)
 
-| Action | Mechanism |
-|--------|-----------|
-| Select node | Opens interactive terminal in side panel |
-| Type in terminal | `pty_input` → writes to node's pi PTY |
-| Stop node | `abort_node` → kills PTY |
-| Stop board | `stop_board` → kills all PTYs on board |
-| Restart node | `restart_node` → kill + respawn fresh pi |
-| Run from entry | `inject_task` → bracketed paste into entry node |
+Interface abstracting PTY operations. Methods: `spawn(config)`, `write(data)`,
+`inject(message)`, `resize(cols, rows)`, `kill()`, `markReady()`, `isRunning()`,
+`isReady()`, `size()`.
 
-There is no separate *user-facing* `steer` API: intervention is **terminal-native** — you type into the pi TUI like a normal console. (Internally, the explicit-intent watchdog injects a follow-up message at `agent_end` to ask a pipeline node whether it means to hand off or is done — see *Handoff protocol*. It can be disabled per node.)
+### PtyRuntime (`backend/src/pty/runtime/PtyRuntime.ts`)
 
-**Terminal mirroring & PTY geometry.** Each node has a single backend PTY that can be viewed from two places: the read-only mini terminal on the node card and the interactive side-panel terminal. Both `attach_node` to the same session and replay its scrollback. The node-card mirrors attach with `spawn:true, resize:false` so a board's pi sessions **boot automatically on load** (no need to open the side panel), while **only the interactive owner sizes the PTY** (`fit()` → `pty_resize`); mirrors never resize — otherwise the PTY width would drift from the interactive xterm and pi's input line would wrap on every keystroke. Because the mirror renders pi's absolute-cursor TUI at the PTY's real `cols×rows`, it scales the grid to the card width by measuring `.xterm-screen` (the true grid, not the stretched `.xterm` container) and applying a CSS transform.
+Abstract base class with common PTY logic (write, inject with bracketed paste,
+resize, kill, state tracking). Subclasses only override `spawn()`.
+
+### PiRuntime (`backend/src/pty/runtime/PiRuntime.ts`)
+
+Spawns `pi` CLI with `--tools`, `--system-prompt`, `--extension call-agent.ts`.
+Windows-aware (handles `.cmd`/`.bat` npm shims on PATH).
+
+### HermesRuntime (`backend/src/pty/runtime/HermesRuntime.ts`)
+
+Spawns `hermes --tui` with `--toolsets`. Uses `HERMES_EPHEMERAL_SYSTEM_PROMPT`
+env var for per-node system prompt isolation. Orchestration hooks run via a
+plugin in `~/.hermes/plugins/orchestra/`. Gated behind
+`PINODES_ORCHESTRA_HERMES=true` (off by default).
+
+### BoardManager (`backend/src/orchestra/BoardManager.ts`)
+
+CRUD for boards, graphs, nodes, edges. Validates graph consistency (no
+self-loops, non-final nodes must have outgoing edges). Persists to SQLite.
+
+### Routes (`backend/src/routes/orchestra.ts`, `backend/src/index.ts`)
+
+- `/api/v1/orchestra/*` — REST API for boards, graphs, nodes, edges, flows
+- `/internal/*` — callbacks from pi extension and Hermes plugin
+- `/internal/turn-ended` — Hermes watchdog signal (non-final node finished without handoff → nudge)
+- `/ws` — WebSocket for live UI sync (pty_output, node_status, handoff events)
+
+## Node runtime selection
+
+```typescript
+interface WorkflowNode {
+  runtime?: "pi" | "hermes";  // absent = "pi" (backward compat)
+  runtimeConfig?: Record<string, unknown>;  // model, toolset, flags (no secrets!)
+}
+```
+
+PtyHub selects the runtime at spawn time:
+- `runtime: "hermes"` + `PINODES_ORCHESTRA_HERMES=true` → HermesRuntime
+- Otherwise → PiRuntime (default)
 
 ## Handoff protocol
 
-Agents delegate via a **text block** parsed by `backend/pi-extensions/call-agent.ts` on `agent_end`:
+Agents communicate through a structured handoff:
 
-```
-@@HANDOFF:<recipient-handle>
-<complete, self-contained instructions for the next agent>
-@@END
-```
+1. Agent A ends its turn with a `@@HANDOFF:<recipient-handle>` block
+2. The pi extension (or Hermes plugin) calls `POST /internal/call-agent`
+3. PtyHub resolves the recipient and injects the task into the target node's PTY
+4. A `handoff` event is broadcast via WebSocket for the timeline
 
-To end the chain instead of delegating, a node closes with `@@DONE` on its own line (see *Explicit intent* below).
+The same protocol works for both pi (via `call-agent.ts` extension) and Hermes
+(via `orchestra_handoff` tool in the plugin).
 
-Why output parsing instead of a custom pi tool?
+## Determinism watchdog
 
-- Works on **any provider**, including Cursor composer (which may not expose extension tools)
-- No model cooperation required beyond following the system prompt appendix
+Ensures non-final nodes always hand off:
 
-**Recipient addressing.** Node ids are UUIDs, which models don't echo reliably, and labels (roles) repeat when a role is parallelised. So each node gets a short, unique **handle** derived from its label (`developer-1`, `developer-2`), listed in the orchestration appendix; that handle is what agents write after `@@HANDOFF:`. `PtyHub.deliverCall` resolves the recipient against the sender's *outgoing* neighbours by handle, then raw UUID, then an unambiguous label, with a single-target fallback — and nudges the sender if it still can't resolve, so a hand-off never fails silently.
+**pi**: extension's `before_agent_start` checks if the last turn ended without
+handoff → re-prompts via `sendUserMessage` (max retries, then `handoff-failed`).
 
-**Direction & termination.** Only outgoing edges define who an agent may delegate to. The backend validates the resolved edge `source → target`, ensures the target terminal exists, and injects the message. A node with `canBeFinal = true` may end the chain (e.g. an approved final review) by not emitting a block. A node with `canBeFinal = false` **must** hand off — see determinism below.
+**Hermes**: `post_llm_call` hook → `POST /internal/turn-ended`. If non-final and
+no handoff, the backend injects a nudge into the PTY (up to `MAX_STEER_RETRIES`).
 
-**Per-turn orchestration context.** The appendix listing recipients, the finality rule, and the Kanban hint is **not frozen at spawn**. Each turn, the extension's `before_agent_start` hook pulls the current context from `GET /internal/orchestra-context` and refreshes the system prompt (wrapped in a sentinel so it never accumulates). A graph edit — wiring/unwiring an edge, flipping `canBeFinal` — is therefore picked up on the node's **next turn**, with no message typed into the PTY. This is deliberate: typing orchestration updates into the PTY made pi treat them as a new user task. The spawn-time appendix is still baked into `PINODES_ORCHESTRA_FALLBACK_APPENDIX` (env) so the extension degrades gracefully if the backend is briefly unreachable.
+## Data flow
 
-**Explicit intent (determinism).** Enforcement runs on `agent_end` — when the agent has finished its *whole* response and is awaiting input — **not** on `turn_end` (which fires once per loop iteration, mid-work). At that point the final message must carry an **explicit** terminal intent, never inferred from prose:
+### Graph sync
+1. Frontend serializes React Flow nodes → `WorkflowGraph` via `graphFromFlow()`
+2. `PUT /api/v1/orchestra/boards/:id/graph` or WS `load_graph`
+3. Backend validates → persists to SQLite → load into PtyHub
 
-- one or more `@@HANDOFF:<handle> … @@END` blocks → delegate downstream (**fan-out allowed** — more than one runs agents in parallel), or
-- `@@DONE` → end the chain here.
+### Terminal stream
+1. Agent process writes to PTY → `term.onData` → PtyHub accumulates buffer (256k scrollback)
+2. PtyHub broadcasts `pty_output` via WebSocket
+3. Frontend writes to xterm.js (interactive panel) or scaled mirror (node card)
 
-If a **pipeline node** (non-final, *or* final-but-with-outgoing-edges) ends with **neither**, the extension asks the model to choose (`pi.sendUserMessage(...)`, capped at `PINODES_ORCHESTRA_MAX_STEER_RETRIES`, default 2). A non-final node that writes `@@DONE` is rejected — it must hand off. After the cap a non-final node is reported via `/internal/handoff-failed` (`node_status: "error"` on the card); a final-capable node is allowed to end. A **pure leaf** (final, no outgoing) may end freely. Handoff delivery uses retry + backoff and is **not** retried on a deterministic rejection (unresolvable recipient). A contradictory state — `canBeFinal = false` with no outgoing edge — is rejected at graph-edit time (`BoardManager.validateGraph`).
+### Inject flow
+1. Task arrives (user starts, agent hands off, watchdog nudge)
+2. `scheduleInject` → if node is spawned and ready, inject immediately
+3. If not ready, queue → flushed on `markReady` (or after 10s fallback timeout)
 
-**Per-node watchdog toggle.** The explicit-intent check can be turned **off per node** (shield icon on the card, or WS `set_enforcement` / env `PINODES_ORCHESTRA_ENFORCE`) so you can chat freely with one node without being asked "hand off or done?". Handoffs and card moves still deliver while it's off — only the confirmation prompt is suppressed. The flag is read per loop via `orchestra-context`, so toggling takes effect on the node's next turn.
+## Security
 
-**Ready-gated delivery.** A task injected into a node waits for the node's pi to report `session_start` (`POST /internal/ready`) before the paste, instead of guessing the boot time with a fixed timer. A conservative fallback timeout still fires if the extension never reports ready (old pi / load failure), so a task is never dropped.
+See [docs/SECURITY.md](./docs/SECURITY.md) for the full threat model and controls.
 
-### Kanban integration
+Key points:
+- Backend binds `127.0.0.1` by default
+- CORS + WebSocket Origin checks prevent cross-origin attacks
+- `PINODES_ORCHESTRA_TOKEN` provides shared-secret auth (required by VS Code extension)
+- `runtimeConfig` must never contain secrets (credentials live in runtime-specific configs)
 
-When a board is Kanban-tracked (`track_kanban`), agents may also emit:
+## Feature flags
 
-```
-@@CARD:<column>
-```
-
-Valid columns: `todo`, `in_progress`, `test`, `review`, `done`.
-
-## Stack
-
-| Layer | Tech |
-|-------|------|
-| UI | React 19, Vite, `@xyflow/react`, Tailwind v4 (`@tailwindcss/vite`), xterm.js, Zustand |
-| Realtime | WebSocket (`@fastify/websocket`) |
-| API | Fastify 5 REST (prompt CRUD, workflow CRUD, orchestration CRUD) |
-| Orchestration | Node.js + `node-pty` + pi CLI + `BoardManager` |
-| Handoff hook | pi extension (`call-agent.ts`) |
-| Storage | SQLite (`better-sqlite3`) — prompts, workflows, boards |
-| Auth | `PINODES_ORCHESTRA_TOKEN` — shared-secret for API/internal routes and WebSocket handshakes; VS Code extension auto-generates an ephemeral token when none is configured |
-
-## Project layout
-
-```
-pinodes-orchestra/
-├── ARCHITECTURE.md          # this file
-├── README.md
-├── docs/
-│   ├── EXTENSIONS_ROADMAP.md
-│   ├── EXTENSION_PUBLISHING.md
-│   ├── HERMES_DESKTOP.md
-│   ├── MULTI_INSTANCE.md    # per-window backend isolation (VS Code)
-│   ├── PROGRAMMATIC_API.md
-│   └── SECURITY.md
-├── prompts/                 # seed builtin markdown (14 roles)
-├── backend/
-│   ├── pi-extensions/
-│   │   └── call-agent.ts    # @@HANDOFF / @@CARD parser
-│   └── src/
-│       ├── index.ts         # Fastify + REST + WS + static frontend
-│       ├── db/index.ts      # SQLite schema, prompt CRUD, workflow CRUD, board CRUD
-│       ├── pty/PtyHub.ts    # spawn pi, inject, handoff delivery, PTY lifecycle
-│       ├── ws/handler.ts    # WebSocket protocol (attach, input, resize, graph load…)
-│       ├── routes/orchestra.ts  # /api/v1/orchestra — programmatic board/flow REST API
-│       ├── orchestra/BoardManager.ts  # board state + graph management, bridges db ↔ PtyHub
-│       ├── utils/security.ts    # CORS allowlist, auth token, WS handshake validation
-│       ├── utils/paths.ts      # resolveCwd, resolveBoardCwd (shared path validation)
-│       └── types.ts
-├── frontend/
-│   └── src/
-│       ├── components/      # FlowCanvas, AgentNode, TimelinePanel, TerminalPanel, TerminalOverlay,
-│       │                    # KanbanBoard, PromptLibrary, WorkflowPicker, NodeInspector,
-│       │                    # SystemPromptModal, BoardTabs
-│       ├── stores/          # boardStore, runtimeStore, kanbanStore, timelineStore (zustand)
-│       ├── hooks/           # useOrchestraWs, usePiRestartState, useTimelineCapture
-│       └── lib/             # api, ptyBus, termTheme, termFit, embed (host-embed flags)
-└── vscode-extension/        # VS Code host: spawns the backend, frames the UI in a webview
-    └── src/                 # extension, backend (subprocess mgr), panel (webview), controlView
-                             # sessionToken.ts (ephemeral auto-token), port.ts (free-port
-                             # allocation), workspaceDataDir.ts (per-workspace SQLite dir)
-```
-
-## WebSocket protocol
-
-### Server → client
-
-| Event | Payload |
-|-------|---------|
-| `connected` | handshake |
-| `node_status` | `{ boardId, nodeId, status, message? }` |
-| `handoff` | `{ boardId, fromNodeId, toNodeId }` — canonical agent-to-agent hand-off signal, broadcast by `PtyHub.deliverCall` on every successful delivery. The timeline records handoffs from this event (no client-side inference). Fires exactly once per successful hand-off, never on a failed recipient resolution |
-| `pty_output` | `{ boardId, nodeId, data, replay?, cols?, rows? }` |
-| `pty_size` | `{ boardId, nodeId, cols, rows }` — PTY geometry broadcast (read-only mirrors use this to scale) |
-| `pty_exit` | `{ boardId, nodeId, code }` |
-| `node_ready` | `{ boardId, nodeId }` — pi has booted (reported `session_start`); clients clear the "starting pi…" overlay. Also sent to a late-attaching client if the node is already ready |
-| `card_status` | `{ boardId, column }` |
-| `enforcement` | `{ boardId, nodeId, enabled }` — per-node determinism-watchdog state (UI toggle sync) |
-| `stream` | _Reserved — not currently emitted._ `{ boardId, nodeId, kind, text }` — structured streaming (`text`, `thinking`, `tool_start`, `tool_end`). Client handler exists; the backend has no pi-agent relay yet (planned 0.2.19) |
-| `message_in` | _Reserved — not currently emitted._ `{ boardId, nodeId, source, text }` — completed message. Client handler exists; no backend relay yet (planned 0.2.19) |
-| `turn_end` | _Reserved — not currently emitted._ `{ boardId, nodeId }` — agent turn finished; frontend would flush the stream buffer. Client handler exists; no backend relay yet (planned 0.2.19) |
-| `error` | `{ message, boardId?, nodeId? }` |
-
-### Client → server
-
-| Command | Purpose |
-|---------|---------|
-| `load_graph` | Sync nodes/edges + cwd to PtyHub |
-| `attach_node` | Subscribe to scrollback; spawn pi if missing (`spawn`), claim PTY resize authority (`resize`). Node-card mirrors pass `resize:false` |
-| `pty_input` | User keystrokes into pi |
-| `pty_resize` | Terminal geometry |
-| `inject_task` | Start flow at a node (Kanban / Run) |
-| `track_kanban` | Enable @@CARD appendix on this board |
-| `set_enforcement` | Toggle the determinism watchdog for one node (`{ nodeId, enabled }`) |
-| `restart_node` | Fresh pi session |
-| `abort_node` | Kill one node |
-| `stop_board` | Kill all nodes on board |
-
-All messages may include `boardId` (defaults to `default`).
-
-## REST API (standalone)
-
-| Endpoint | Purpose |
-|----------|---------|
-| `GET /api/health` | Liveness |
-| `GET /api/info` | `{ defaultCwd, port, wsPath }` |
-| `GET/POST/PUT/DELETE /api/prompts` | Prompt library CRUD |
-| `GET/POST/DELETE /api/workflows` | Workflow persistence |
-| `POST /api/validate-path` | Validate board cwd |
-| `POST /internal/call-agent` | Handoff delivery (from pi extension) |
-| `POST /internal/card-status` | Kanban card move (from pi extension) |
-| `GET /internal/orchestra-context` | Per-turn appendix + recipients + finality (from pi extension) |
-| `POST /internal/ready` | Ready marker — flushes queued injects (from pi extension) |
-| `POST /internal/handoff-failed` | Determinism watchdog gave up → node card error (from pi extension) |
-
-See [docs/PROGRAMMATIC_API.md](./docs/PROGRAMMATIC_API.md) for the full programmatic orchestration API (board lifecycle, graph load, flow execution, auth).
-
-## Environment variables
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `PORT` | `3847` | Backend listen port |
-| `PINODES_ORCHESTRA_HOST` | `127.0.0.1` | Backend listen host; use `0.0.0.0` only for explicit LAN/remote access |
-| `PINODES_ORCHESTRA_ALLOWED_ORIGINS` | loopback + Vite dev origins | Extra comma-separated browser origins allowed by CORS and WebSocket Origin checks |
-| `PINODES_ORCHESTRA_URL` | `http://localhost:<port>` | Callback URL injected into pi nodes |
-| `PINODES_ORCHESTRA_PORT` | `PORT` | Overrides only the port in that callback URL — **not** the listen port |
-| `PINODES_ORCHESTRA_ROOT` | repo root | Bundled prompts location |
-| `PINODES_ORCHESTRA_DATA_DIR` | `<root>/data` | SQLite database directory |
-| `PINODES_ORCHESTRA_TOKEN` | (empty — no auth) | Optional shared secret for all API/internal routes and WebSocket handshakes except `/api/health`; standalone browser clients pass it with `?token=...` or `localStorage.PINODES_ORCHESTRA_TOKEN`. **The VS Code extension auto-generates an ephemeral token per session when this is not set** (see `vscode-extension/src/sessionToken.ts`) |
-| `PINODES_ORCHESTRA_MAX_STEER_RETRIES` | `2` | Confirm retries before a non-final node that won't hand off is marked `error` |
-| `PINODES_ORCHESTRA_ENFORCE` | `true` | Default for the per-node determinism watchdog (`false` = off everywhere unless re-enabled per node) |
-| `VITE_API_BASE` | (empty) | Frontend build-time backend URL |
-
-## Multi-board (repo tabs)
-
-Each board tab = one `cwd` + workflow snapshot + isolated `boardId:nodeId` PTY sessions.
-
-- Left sidebar: tabs per repo, **+** to add (validates via `/api/validate-path`)
-- Switching tab loads snapshot and syncs graph via `load_graph`
-- Runtime state keyed by `boardId:nodeId`
-- **Stop board** aborts only the active board's nodes
-
-When **embedded in a host** (VS Code) the iframe URL carries `?embed=vscode&cwd=…`: the frontend collapses to a single board bound to the host workspace folder (`boardStore.bindWorkspace`) and hides the repo-tab sidebar — the host already owns the "current project". See `frontend/src/lib/embed.ts` and [docs/EXTENSIONS_ROADMAP.md](./docs/EXTENSIONS_ROADMAP.md).
-
-Each VS Code window spawns its **own** backend on a dedicated port (first free port from `3847`) with a per-workspace SQLite directory, so multiple windows never share state or a port. The standalone backend is unchanged (single process, `PORT` default `3847`); the per-window isolation lives entirely in the extension via env vars (`PORT`, `PINODES_ORCHESTRA_DATA_DIR`, `PINODES_ORCHESTRA_TOKEN`). See [docs/MULTI_INSTANCE.md](./docs/MULTI_INSTANCE.md).
-
-## Views
-
-| View | Purpose |
-|------|---------|
-| **Agents** | Flow canvas + terminals + inspector |
-| **Kanban** | Task cards that launch boards at entry node |
-
-## Runtime types (current + planned)
-
-| Runtime | Status | Notes |
-|---------|--------|-------|
-| **pi CLI** | ✅ implemented | `PtyHub` spawns `pi` with `--extension call-agent.ts` |
-| **Cursor agent** | 🔜 planned | pi with Cursor SDK bridge, or dedicated node type |
-| **Hermes** | 🔜 planned | TUI gateway JSON-RPC per node |
-| **OpenClaw** | 🔜 planned | Gateway `agent` RPC per node |
-
-See [docs/EXTENSIONS_ROADMAP.md](./docs/EXTENSIONS_ROADMAP.md).
-
-## Key features
-
-### canBeFinal — chain termination control
-
-Each node has a `canBeFinal` flag (default: `true`). When `false`, the per-turn orchestration appendix instructs the agent that it **must** hand off to a connected node — it is not allowed to end the chain — and the explicit-intent watchdog enforces it on `agent_end` (ask-to-confirm, then `error`; see *Handoff protocol → Explicit intent*). This is toggled live from the UI (flag icon on the node card); the change is read on the node's **next turn** via the per-turn context refresh (see *Handoff protocol → Per-turn orchestration context*), not pushed into a running pi. A node cannot be `canBeFinal = false` with no outgoing edge — that contradictory state is rejected at graph-edit time by `BoardManager.validateGraph`.
-
-### Prompt override
-
-Every node carries a `promptId` (base prompt from the library) and an optional `promptOverride` string. The override replaces the base prompt content; if empty, the library prompt is used. The `NodeInspector` panel and `SystemPromptModal` provide the editing UI.
-
-### Board persistence
-
-Boards (cwd, label, graph snapshot) are persisted in the `boards` SQLite table. On backend restart, `BoardManager` re-hydrates all boards and replays their graphs into `PtyHub` so handles, handoff resolution, and status queries work immediately.
-
-## Out of scope (v1 standalone)
-
-- Per-node model config UI
-- Run history / analytics
-- Multi-user / RBAC
-- Edge conditions / labels (`@@HANDOFF:<handle> IF <condition>` guards)
-- CLI `--json` flag (machine-readable output; the CLI prints human-friendly text today)
+| Flag | Default | Effect |
+|------|---------|--------|
+| `PINODES_ORCHESTRA_HERMES` | `false` | Enable HermesRuntime for `runtime: "hermes"` nodes |
+| `PINODES_ORCHESTRA_ENFORCE` | `true` | Default determinism watchdog state (can be toggled per-node) |

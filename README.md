@@ -157,3 +157,27 @@ Standalone (browser/PWA) is the reference implementation. Hosts:
 
 Native `runtime: "cursor"` agent nodes (beyond pi) remain on the roadmap.
 Details: [docs/EXTENSIONS_ROADMAP.md](./docs/EXTENSIONS_ROADMAP.md).
+
+## Hermes runtime nodes
+
+Orchestra now supports **Hermes** agent nodes alongside pi. Each node has an
+optional `runtime` field (`"pi"` | `"hermes"`, default `"pi"`).
+
+**Feature flag:** Hermes nodes are gated behind `PINODES_ORCHESTRA_HERMES=true`.
+When off (default), `runtime: "hermes"` degrades to pi — production is unchanged.
+
+**Requirements for Hermes nodes:**
+- Hermes installed and on PATH (`hermes --version`)
+- The `orchestra` plugin installed in `~/.hermes/plugins/orchestra/`
+  (bundled in `backend/hermes-plugins/orchestra/` — copy or symlink it)
+
+**How it works:**
+- Each Hermes node runs `hermes --tui` in a PTY, just like pi.
+- System prompt is passed via `HERMES_EPHEMERAL_SYSTEM_PROMPT` env var
+  (per-process, per-node, isolated — same as `--system-prompt` for pi).
+- Orchestration hooks (handoff, context, watchdog) run via a Hermes plugin
+  instead of `--extension call-agent.ts`.
+- The xterm UI renders Hermes identically to pi — zero frontend changes needed.
+
+**Details:** [docs/HERMES_TUI_IMPLEMENTATION_PLAN.md](./docs/HERMES_TUI_IMPLEMENTATION_PLAN.md),
+[docs/HERMES_TUI_SPIKE_RESULT.md](./docs/HERMES_TUI_SPIKE_RESULT.md).

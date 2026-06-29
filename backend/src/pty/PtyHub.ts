@@ -3,6 +3,7 @@ import { getPrompt } from "../db/index.js";
 import type { NodeStatus, WorkflowEdge, WorkflowGraph, WorkflowNode } from "../types.js";
 import { resolveCwd } from "../utils/paths.js";
 import type { INodeRuntime } from "./runtime/INodeRuntime.js";
+import { HermesRuntime } from "./runtime/HermesRuntime.js";
 import { PiRuntime } from "./runtime/PiRuntime.js";
 
 const MAX_BUFFER = 256_000; // scrollback kept per node for re-attach
@@ -336,7 +337,12 @@ export class PtyHub {
       this.connectionsAppendix(boardId, nodeId) +
       (this.kanbanBoards.has(boardId) ? this.kanbanAppendix() : "");
 
-    const runtime = new PiRuntime();
+    // Feature flag evaluated at spawn time (not module load) so tests can toggle it.
+    const hermesEnabled = process.env.PINODES_ORCHESTRA_HERMES === "true";
+    const runtime: INodeRuntime =
+      node?.runtime === "hermes" && hermesEnabled
+        ? new HermesRuntime()
+        : new PiRuntime();
 
     const k = key(boardId, nodeId);
     this.ready.delete(k);
