@@ -1,219 +1,189 @@
 # Hermes TUI Runtime — Piano Implementativo (Test-First, Cauto e Prudente)
 
 > **Data:** 2026-06-28
+> **Revisione:** 2026-06-29 (v3) — **architettura decisa dopo indagine sul web**: path A (`hermes --tui` in PTY + plugin Hermes). Il path "gateway/JSON-RPC" è scartato. Mappatura pi→Hermes completa. Vedi *Changelog revisione* in fondo.
 > **Stato:** Solo piano — nessuna modifica al codice
 > **Principio guida:** Ogni fase inizia con i test. Mai modificare il comportamento esistente senza prima avere test che lo catturano. Backward compatibility sempre garantita.
 
 ---
 
-## Principi del Piano
+## Decisione architetturale — PATH A (`hermes --tui` in un PTY)
 
-1. **Test-first assoluto:** Prima di toccare qualsiasi codice di produzione, si scrivono test che catturano il comportamento attuale. Se un test fallisce dopo una modifica, si ferma tutto.
-2. **Zero behavior change nei refactoring interni:** Le fasi di estrazione non devono cambiare nessun comportamento osservabile. I test esistenti devono passare identici.
-3. **Feature flag per il nuovo runtime:** Hermes è dietro un flag (`PINODES_ORCHESTRA_HERMES`) finché non è maturo. Default: spento.
-4. **Backward compatibility totale:** I grafi senza campo `runtime` funzionano come oggi (default `"pi"`).
-5. **Commit piccoli e indipendenti:** Ogni sotto-fase è un commit separato, revertibile indipendentemente.
-6. **Validazione continua:** Dopo ogni sotto-fase: `npm test --workspaces --if-present` + `npx tsc --noEmit -p backend` + `npx tsc --noEmit -p frontend`.
+Un nodo Hermes = **un processo `hermes --tui` lanciato in un PTY**, esattamente come un nodo pi lancia un processo `pi`. Niente servizio esterno, niente gateway JSON-RPC.
+
+**Perché path A (e non il gateway):**
+
+- `hermes --tui` è **autosufficiente**: *"By default the TUI spawns its own in-process gateway, so each TUI instance is self-contained — there's nothing to configure"* (doc ufficiale). Nessun `hermes dashboard` da tenere acceso.
+- L'output è la **Ink TUI renderizzata come ANSI** in un terminale → **xterm la disegna gratis**, zero lavoro di rendering frontend. (È esattamente ciò che già facciamo per pi.)
+- È la modalità che l'utente vuole (UI più bella) ed è quella **raccomandata** da Nous per l'uso interattivo.
+- Combacia con la filosofia di Orchestra (*terminali vivi dentro ogni nodo, intervento umano digitando nel terminale*).
+
+**Perché NON il gateway (path B, scartato):** richiederebbe `hermes dashboard --tui` sempre attivo (parte mobile esterna + token che si rigenera), gli eventi sarebbero JSON strutturati **non** ANSI (→ lavoro di rendering frontend sostanziale), e non porta alcun vantaggio per il nostro caso d'uso. Restava un'opzione solo perché i doc precedenti l'avevano assunta senza verificarla.
+
+---
+
+## Mappatura pi → Hermes (parità piena di feature)
+
+Hermes ha un **sistema di plugin/hook completo** (`~/.hermes/plugins/`): un plugin Python registra **tool custom** (che possono fare HTTP) **e** **hook di ciclo di vita** via `ctx.register_hook()`, e legge le **env var** impostate allo spawn. È l'equivalente — più ricco — dell'`--extension call-agent.ts` di pi.
+
+| Cosa fa pi | Equivalente Hermes | Stato |
+|---|---|---|
+| `--system-prompt <ruolo>` | env **`HERMES_EPHEMERAL_SYSTEM_PROMPT=<ruolo>`** allo spawn (per-processo → isolato per nodo, come pi) | ✅ |
+| `--tools read,bash,edit,write,grep` | `--toolsets "..."` | ✅ |
+| `--extension call-agent.ts` | un **plugin** `~/.hermes/plugins/orchestra/` (tool + hook) | ✅ |
+| cwd (da node-pty) | cwd (da node-pty) — identico | ✅ |
+| env `PINODES_ORCHESTRA_URL/_BOARD/_NODE/_TOKEN` | stesse env, lette dal plugin (`os.environ`) | ✅ |
+| hook `session_start` → `POST /internal/ready` | hook **`on_session_start`** → `POST /internal/ready` | ✅ |
+| hook `before_agent_start` → `GET /internal/orchestra-context`, refresh appendix ogni turno | hook **`pre_llm_call`** → ritorna `{"context": "<appendix>"}` (iniettato nel messaggio del turno, ogni turno) | ✅ |
+| `@@HANDOFF` testuale parsato su `agent_end` | **tool custom `orchestra_handoff`** che l'agente chiama → handler fa `POST /internal/call-agent` | ✅ (più pulito) |
+| `@@CARD:<col>` kanban | tool `orchestra_card` (o stesso tool) → `POST /internal/card-status` | ✅ |
+| watchdog determinismo (`pi.sendUserMessage` follow-up) | hook **`post_llm_call`** → `POST /internal/turn-ended`; il backend inietta il nudge **via PTY** (vedi nota sotto) | ⚠️ cablato diverso |
+
+### Nota sul watchdog (l'unico vero "gotcha")
+
+La doc Hermes è esplicita: gli hook **non possono** iniettare follow-up message né mandare nuovi messaggi all'agente (solo bloccare tool, iniettare contesto, riscrivere output). Quindi il "ri-chiedi: handoff o done?" **non** si fa da un hook Hermes. **Ma non serve**, perché possediamo già il PTV:
+
+1. l'hook `post_llm_call` (fine turno) fa `POST /internal/turn-ended { session, response, handoffCalledThisTurn }`
+2. il backend vede "nodo non-final che ha finito senza chiamare `orchestra_handoff`" → **incolla il nudge nel PTY** (lo stesso meccanismo con cui già iniettiamo i task), fino a `MAX_STEER_RETRIES`
+
+Lo "steer" lo fa l'orchestratore via PTY, non un'API interna di Hermes. Parità mantenuta.
+
+### Isolamento del plugin
+
+I plugin/hook Hermes sono **globali** (`~/.hermes/plugins/`), non per-sessione. Il plugin `orchestra` deve quindi **auto-disattivarsi quando `PINODES_ORCHESTRA_NODE` non è nell'env**: si carica per tutte le sessioni Hermes della macchina ma agisce **solo** sui processi lanciati da Orchestra, senza disturbare l'uso normale di Hermes dell'utente. Gate anche dichiarabile in `plugin.yaml` (`requires_env`).
+
+---
+
+## Da confermare nello spike (Fase -1, mezza giornata con Hermes installato)
+
+Due sole verifiche dal vivo prima di codificare Hermes (l'architettura è già decisa):
+
+1. **`HERMES_EPHEMERAL_SYSTEM_PROMPT` persiste su tutti i turni** della sessione, o solo sul primo? Se solo-primo, il ruolo si inietta a ogni turno via `pre_llm_call` (il plugin lo fa comunque). L'isolamento per-nodo è garantito in entrambi i casi (è l'env del processo).
+2. **Bracketed-paste nel `hermes --tui`**: iniettare task/nudge via PTY è affidabile come con pi? (La doc dice che la TUI accetta input in coda anche prima del ready → promettente, ma va visto.)
+
+> Le Fasi 0-1-2 **non dipendono da queste risposte**: sono un refactoring sano a prescindere da Hermes (abilitano anche Cursor/OpenClaw). Possono iniziare in parallelo allo spike.
+
+---
+
+## Separazione delle responsabilità (target del refactor)
+
+| Responsabilità | Proprietario | Note |
+|----------------|--------------|------|
+| Scrollback `buffer` + broadcast `pty_output` | **PtyHub** | Generico: ogni runtime emette `onOutput(data)`, PtyHub accumula (`MAX_BUFFER`) e broadcasta |
+| Decidere *quando* iniettare (ready-gate, coda, fallback) | **PtyHub** | `scheduleInject` + `markReady` + guard `READY_FALLBACK_MS` restano qui |
+| Decidere *come* iniettare (paste, submit, settle) | **Runtime** | `PiRuntime`/`HermesRuntime`: entrambi bracketed paste + settle + `\r` (sono PTY) |
+| Dimensioni `cols/rows` correnti | **Runtime** (fonte di verità) | PtyHub mirror dell'ultimo valore noto per `pty_size` |
+| Lifecycle (`spawn`/`kill`/`restart`) | **Runtime** (meccanismo) + **PtyHub** (orchestrazione) | PtyHub mappa `boardId:nodeId → INodeRuntime` |
+| Segnale di exit per `waitForExit` | **PtyHub** | `onExit` del runtime emette `exit:${boardId}:${nodeId}` sull'`EventEmitter` |
+| Risoluzione handoff, handles, appendix, grafo | **PtyHub** | Completamente runtime-agnostic |
+
+Poiché *entrambi* i runtime sono PTY-based, la differenza tra `PiRuntime` e `HermesRuntime` è minima: **comando + argomenti + env + (per Hermes) garantire che il plugin `orchestra` sia installato**. Valutare un `PtyRuntime` base parametrico da cui derivano entrambi.
+
+---
+
+## Fase -1 — Spike di Validazione (mezza giornata) 🔬
+
+**Obiettivo:** confermare i 2 punti sopra con Hermes installato. **Nessun codice di produzione.**
+**Rischio:** 🟢 Nullo · **Tempo:** 0.5 gg · **Dipendenze:** Nessuna
+
+- Lanciare `hermes --tui` in un terminale con `HERMES_EPHEMERAL_SYSTEM_PROMPT="Sei un test"` e verificare che il ruolo regga su più turni.
+- Scrivere un plugin `orchestra` minimale in `~/.hermes/plugins/` che: su `on_session_start` logga, su `pre_llm_call` inietta un context fisso, espone un tool `orchestra_handoff` che fa una POST a un server locale fittizio. Verificare che l'agente lo chiami e che la POST parta.
+- Provare il bracketed-paste programmatico nel PTY della TUI.
+- **Output:** breve nota di esito in `docs/HERMES_TUI_SPIKE_RESULT.md`. **Gate:** se i 2 punti reggono, le Fasi 3+ procedono come scritte; altrimenti si applica il ripiego (ruolo via `pre_llm_call`).
 
 ---
 
 ## Fase 0 — Estendere il Data Model (zero behavior change)
 
-**Obiettivo:** Aggiungere il campo `runtime` ai tipi e al grafo senza cambiare nessun comportamento.
-**Rischio:** 🟢 Basso
-**Tempo stimato:** 2-3 giorni
-**Dipendenze:** Nessuna
+**Obiettivo:** Aggiungere il campo `runtime` ai tipi e al grafo senza cambiare comportamento.
+**Rischio:** 🟢 Basso · **Tempo:** 2-3 gg · **Dipendenze:** Nessuna (utile a prescindere)
 
 ### 0.1 — Test: serializzazione grafi con runtime field
-
-**File:** `backend/src/db/index.test.ts`
-
-Aggiungere test che verificano:
-- Un grafo con `runtime: "pi"` su ogni nodo si salva e si legge correttamente
-- Un grafo con `runtime: "hermes"` su un nodo si salva e si legge correttamente
-- Un grafo senza campo `runtime` (backward compat) si salva e si legge correttamente
-- Un grafo misto (un nodo pi, un nodo hermes) si salva e si legge correttamente
+**File:** `backend/src/db/index.test.ts` — grafo con `runtime: "pi"`, con `runtime: "hermes"`, senza runtime (backward compat), misto: tutti si salvano/leggono correttamente.
 
 ### 0.2 — Test: validation con runtime field
-
-**File:** `backend/src/orchestra/BoardManager.test.ts`
-
-Aggiungere test che verificano:
-- `addNode` con `runtime: "hermes"` accetta il campo e lo persiste
-- `updateNode` con `runtime: "hermes"` aggiorna il campo
-- `addNode` senza `runtime` funziona come oggi (default implicito)
-- `validateGraph` non cambia comportamento con o senza runtime
+**File:** `backend/src/orchestra/BoardManager.test.ts` — `addNode`/`updateNode` con `runtime: "hermes"` persistono il campo; senza runtime funziona come oggi; `validateGraph` invariato.
 
 ### 0.3 — Test: API REST con runtime field
-
-**File:** Nuovo test o estensione di test esistenti per `routes/orchestra.ts`
-
-Verificare:
-- `POST /boards/:id/nodes` accetta `runtime` nel body
-- `PATCH /boards/:id/nodes/:nodeId` accetta `runtime` nel body
-- `GET /boards/:id/graph` restituisce il campo `runtime` se presente
-- `PUT /boards/:id/graph` preserva il campo `runtime`
+**File:** test per `routes/orchestra.ts` — POST/PATCH nodes accettano `runtime`/`runtimeConfig`; GET/PUT graph li preservano.
 
 ### 0.4 — Implementazione: types.ts (backend + frontend)
-
-**File:** `backend/src/types.ts`
-
 ```typescript
 // AGGIUNGERE (non modificare nulla di esistente):
 export type NodeRuntime = "pi" | "hermes";
-
-// ESTENDERE WorkflowNode — campo opzionale:
-// runtime?: NodeRuntime;        // default "pi" se assente
-// runtimeConfig?: Record<string, unknown>;
+// ESTENDERE WorkflowNode — campi opzionali:
+// runtime?: NodeRuntime;                    // default "pi" se assente
+// runtimeConfig?: Record<string, unknown>;  // SOLO dati non segreti (vedi 0.7)
 ```
-
-**File:** `frontend/src/types.ts`
-
-Stesse modifiche specularle.
+Stesse modifiche speculari in `frontend/src/types.ts`.
 
 ### 0.5 — Implementazione: propagazione nei CRUD
-
-**File:** `backend/src/orchestra/BoardManager.ts`
-
-- `addNode()`: accetta e propaga `runtime` e `runtimeConfig`
-- `updateNode()`: accetta e propaga `runtime` e `runtimeConfig`
-- Nessun altro cambio
-
-**File:** `backend/src/routes/orchestra.ts`
-
-- Body schemas per POST/PATCH nodes: aggiungere campi opzionali `runtime`, `runtimeConfig`
-- Nessun altro cambio
+`BoardManager.addNode()/updateNode()` propagano `runtime`/`runtimeConfig`. Body schemas di `routes/orchestra.ts` accettano i campi opzionali. Nessun altro cambio.
 
 ### 0.6 — Validazione
-
 ```bash
 npm test --workspaces --if-present
 npx tsc --noEmit -p backend
 npx tsc --noEmit -p frontend
 ```
+**Gate:** Tutti i test passano. Il campo `runtime` è serializzato ma ignorato dalla logica.
 
-**Gate:** Tutti i test passano. Nessun cambio di comportamento. Il campo `runtime` è serializzato nel JSON ma ignorato dalla logica.
+### 0.7 — ⚠️ Vincolo di sicurezza su `runtimeConfig`
+`runtimeConfig` è persistito in `boards.graph_data` (SQLite) **e spedito al browser via WS**. Quindi:
+- ✅ Ammesso: nome modello, toolset, flag non sensibili.
+- ❌ Vietato: qualsiasi segreto/token. Le credenziali Hermes vivono in `~/.hermes/` o in env del processo, **mai nel grafo**.
+Documentare il vincolo in `docs/SECURITY.md`.
 
 ---
 
 ## Fase 1 — Test di Protezione per PtyHub (nessun cambio a PtyHub)
 
-**Obiettivo:** Scrivere test che catturano il comportamento attuale di PtyHub in modo più granulare, così da avere una rete di sicurezza per il refactoring della Fase 2.
-**Rischio:** 🟢 Basso (solo test, nessun cambio codice produzione)
-**Tempo stimato:** 2-3 giorni
-**Dipendenze:** Fase 0 completata
+**Obiettivo:** rete di sicurezza granulare prima del refactor di Fase 2.
+**Rischio:** 🟢 Basso · **Tempo:** 2-3 gg · **Dipendenze:** Fase 0 (consigliata)
 
-### 1.1 — Test aggiuntivi per PtyHub
+### 1.1 — Test aggiuntivi per PtyHub (`backend/src/pty/PtyHub.test.ts`)
 
-**File:** `backend/src/pty/PtyHub.test.ts`
+**Spawn:** `pty.spawn` con args corretti (`--tools`, `--session-id`, `--name`, `--system-prompt`, `--extension`); env corrette (`PINODES_ORCHESTRA_URL/_BOARD/_NODE/_FALLBACK_APPENDIX`); con/senza token; broadcast `node_status: running` + `pty_size`.
+**Lifecycle:** `kill` rimuove sessione + broadcast `pty_exit`/`node_status: idle`; `restart` = PTV fresco; dopo `kill` → `isNodeRunning`/`isReady` false; `onExit` emette `exit:${boardId}:${nodeId}` (lo usa `waitForExit`).
+**I/O:** `input` scrive nel PTY; su nodo non running è no-op; `resize` aggiorna dim + broadcast; resize su non running no-op.
+**Ready + Inject:** inject prima di `markReady` → coda; `markReady` flush dopo `READY_SETTLE_MS`; inject dopo ready → immediato; `restart` azzera ready → prossimo inject in coda; fallback dopo `READY_FALLBACK_MS`; `scheduleInject` con sessione deferita salva nel `pending` e inietta a `setGraph`.
+**Buffer:** accumula fino a `MAX_BUFFER`, tronca i più vecchi; attach replay = buffer corrente.
+**Handoff:** `deliverCall` risolve per handle / UUID / label univoca; target non risolvibile → errore + nudge sender; target valido → `scheduleInject` + broadcast `handoff`.
 
-Test da aggiungere (se non già coperti):
-
-**Spawn:**
-- `spawn` invoca `pty.spawn` con gli argomenti corretti (`--tools`, `--session-id`, `--name`, `--system-prompt`, `--extension`)
-- `spawn` imposta le env vars corrette (`PINODES_ORCHESTRA_URL`, `PINODES_ORCHESTRA_BOARD`, `PINODES_ORCHESTRA_NODE`, `PINODES_ORCHESTRA_FALLBACK_APPENDIX`)
-- `spawn` con token imposta `PINODES_ORCHESTRA_TOKEN` nell'env
-- `spawn` senza token non imposta `PINODES_ORCHESTRA_TOKEN`
-- `spawn` broadcasta `node_status: running` e `pty_size`
-
-**Lifecycle:**
-- `kill` rimuove la sessione, broadcasta `pty_exit` e `node_status: idle`
-- `restart` kill + respawn, la nuova sessione ha un PTY fresco
-- Dopo `kill`, `isNodeRunning` restituisce false
-- Dopo `kill`, `isReady` restituisce false
-
-**I/O:**
-- `input` scrive dati nel PTY della sessione
-- `input` su nodo non running è un no-op (non throwa)
-- `resize` aggiorna le dimensioni e broadcasta `pty_size`
-- `resize` su nodo non running è un no-op
-
-**Ready + Inject:**
-- `injectTask` prima di `markReady` → messaggio in coda
-- `markReady` flusha la coda dopo `READY_SETTLE_MS`
-- `injectTask` dopo `markReady` → inject immediato
-- `restart` cancella lo stato ready → prossimo inject va in coda
-- Fallback timeout inietta dopo `READY_FALLBACK_MS` se ready non arriva
-
-**Buffer:**
-- Il buffer accumula output fino a `MAX_BUFFER` (256KB)
-- Oltre `MAX_BUFFER`, i dati più vecchi vengono troncati
-- L'attach con replay restituisce il buffer corrente
-
-**Handoff:**
-- `deliverCall` risolve il target per handle
-- `deliverCall` risolve il target per UUID
-- `deliverCall` risolve il target per label univoca
-- `deliverCall` su target non risolvibile restituisce errore e nudges il sender
-- `deliverCall` su target risolvibile fa `scheduleInject`
-
-### 1.2 — Test per il PTY output lifecycle
-
-Verificare che `term.onData` accumula nel buffer e broadcasta, e che `term.onExit` fa cleanup completo.
+### 1.2 — PTY output lifecycle
+`term.onData` accumula+broadcasta; `term.onExit` fa cleanup completo; guard "solo se è ancora la sessione attiva" protegge il restart.
 
 ### 1.3 — Validazione
-
 ```bash
 cd backend && npx vitest run src/pty/PtyHub.test.ts
 ```
-
-**Gate:** Tutti i nuovi test passano. Il codice di PtyHub non è stato toccato.
+**Gate:** Nuovi test passano. PtyHub non toccato.
 
 ---
 
-## Fase 2 — Estrarre l'Interfaccia INodeRuntime (refactoring interno)
+## Fase 2 — Estrarre INodeRuntime + PiRuntime (refactoring interno)
 
-**Obiettivo:** Estrarre le operazioni runtime-specifiche da PtyHub in un'interfaccia `INodeRuntime` e una classe `PiRuntime`, senza cambiare nessun comportamento.
-**Rischio:** 🟡 Medio — è il passo più delicato
-**Tempo stimato:** 1 settimana
-**Dipendenze:** Fase 1 completata (test di protezione in place)
+**Obiettivo:** estrarre le operazioni runtime-specifiche da PtyHub in `INodeRuntime`/`PiRuntime`, zero behavior change. Vale a prescindere da Hermes.
+**Rischio:** 🟡 Medio (passo più delicato) · **Tempo:** 1 sett · **Dipendenze:** Fase 1
 
-### 2.1 — Definire l'interfaccia INodeRuntime
-
-**File Nuovo:** `backend/src/pty/runtime/INodeRuntime.ts`
-
+### 2.1 — `backend/src/pty/runtime/INodeRuntime.ts`
 ```typescript
 export interface INodeRuntime {
-  /**
-   * Spawn a new session for the given node. Must call lifecycle callbacks:
-   * - onOutput(data) when the PTY/process emits output
-   * - onExit(code) when the session terminates
-   * - onReady() when the session is ready for input
-   */
-  spawn(config: RuntimeSpawnConfig): void;
-
-  /** Write raw input data to the session (keystrokes). */
+  spawn(config: RuntimeSpawnConfig): void; // chiama onOutput/onExit/onReady/onError
   write(data: string): void;
-
-  /** Inject a message as a task (bracketed paste or equivalent). */
-  inject(message: string): void;
-
-  /** Resize the terminal dimensions. May be a no-op for some runtimes. */
+  inject(message: string): void;           // il "come": paste + settle + \r
   resize(cols: number, rows: number): void;
-
-  /** Kill the session. */
   kill(): void;
-
-  /** Whether the session is currently alive. */
   isRunning(): boolean;
-
-  /** Whether the session has reported ready for input. */
   isReady(): boolean;
-
-  /** Current terminal dimensions, if known. */
-  size(): { cols: number; rows: number } | undefined;
+  size(): { cols: number; rows: number } | undefined; // runtime = fonte di verità
 }
 
 export interface RuntimeSpawnConfig {
-  boardId: string;
-  nodeId: string;
-  label: string;
-  cwd: string;
-  cols: number;
-  rows: number;
-  systemPrompt: string;
-  appendix: string;
-  // Callbacks — il runtime li chiama quando succede qualcosa
+  boardId: string; nodeId: string; label: string;
+  cwd: string; cols: number; rows: number;
+  systemPrompt: string; appendix: string;
+  runtimeConfig?: Record<string, unknown>; // non segreti
   onOutput: (data: string) => void;
   onExit: (code: number | null) => void;
   onReady: () => void;
@@ -221,327 +191,126 @@ export interface RuntimeSpawnConfig {
 }
 ```
 
-### 2.2 — Estrarre PiRuntime
+### 2.2 — `backend/src/pty/runtime/PiRuntime.ts`
+Spostare la logica pi-specifica da PtyHub: `resolvePiCommand()`/`PI_BIN_NAMES`/`findInPath()`, `EXTENSION_PATH`/`hasExtension`, il blocco `pty.spawn(...)` con args+env, il bracketed paste + `\r` di submit, il settle `READY_SETTLE_MS` prima del primo paste. **Spostare codice, non riscriverlo.**
 
-**File Nuovo:** `backend/src/pty/runtime/PiRuntime.ts`
+> Suggerimento: estrarre un `PtyRuntime` base (spawn di un comando in PTY, buffer-less, callback) e far derivare `PiRuntime` (comando pi + args) — così `HermesRuntime` (Fase 3) è un'altra sottoclasse minima.
 
-Spostare TUTTA la logica pi-specifica da PtyHub in questa classe:
-- `resolvePiCommand()` e `PI_BIN_NAMES`
-- `EXTENSION_PATH`
-- Il blocco `pty.spawn(...)` con tutti gli argomenti CLI
-- Il bracketed paste in `inject()`
-- `READY_SETTLE_MS` / `READY_FALLBACK_MS`
-
-**Principio:** Spostare codice, non riscriverlo. Ogni riga deve essere identica al comportamento attuale.
+### 2.2bis — Risoluzione incoerenza READY_*
+- `READY_SETTLE_MS` (TUI mount prima del paste) → **runtime** (`PiRuntime.inject`). Per Hermes verrà tarato uguale (è anch'essa una TUI).
+- `READY_FALLBACK_MS` (guard "non perdere mai il task") → **PtyHub.scheduleInject** (generico).
+- `markReady` non applica più il settle in proprio: chiama `runtime.inject(msg)`, il runtime applica il suo settle.
 
 ### 2.3 — Refactoring di PtyHub
-
-**File:** `backend/src/pty/PtyHub.ts`
-
-- PtyHub crea `PiRuntime` per ogni sessione (default)
-- I metodi `spawn`, `input`, `inject`, `resize`, `kill`, `isReady` delegano all'`INodeRuntime`
-- I metodi `deliverCall`, `orchestraContext`, `handles`, `connectionsAppendix`, `setGraph`, `scheduleInject`, `markReady` restano in PtyHub (sono runtime-agnostic)
-- `Session` interface diventa `{ runtime: INodeRuntime; buffer: string; ... }`
+- PtyHub crea `PiRuntime` per ogni sessione (default).
+- **Delegano** al runtime: `spawn`, `input`, `inject`, `resize`, `kill`, `restart`, `size`, parte di `isReady`.
+- **Restano in PtyHub** (runtime-agnostic): `setGraph`, `orchestraContext`, `outgoingTargets`, `hasEdge`, `handles`, `canBeFinal`, `connectionsAppendix`, `kanbanAppendix`, `resolveOutgoingTarget`, `deliverCall`, `injectTask`, `scheduleInject`, `markReady`, `setBroadcast`, `notify`, `setKanbanTracked`, `isEnforced`, `setEnforcement`, `enforcementOverrides`, `killBoard`, `isNodeRunning`, `getNodeStatuses`, `getEdges`, `waitForExit`, `ensure`.
+- `Session` → `{ runtime: INodeRuntime; buffer: string; cols: number; rows: number; startedAt: number }`.
+- Buffer/broadcast restano in PtyHub (`onOutput` → accumula + `pty_output`). Size: runtime fonte di verità, PtyHub mirror per `pty_size`. Exit: `onExit` → `events.emit("exit:"+...)` così `waitForExit` continua a funzionare.
 
 ### 2.4 — Test: comportamento identico
+Tutti i test esistenti + quelli di Fase 1 passano **senza modifica**. Il mock di `node-pty` resta al confine `node-pty`.
 
-**File:** `backend/src/pty/PtyHub.test.ts`
-
-- TUTTI i test esistenti devono passare senza modifica
-- I nuovi test della Fase 1 devono passare senza modifica
-- Il mock di `node-pty` deve funzionare con il nuovo PiRuntime
-
-### 2.5 — Test: PiRuntime isolato
-
-**File Nuovo:** `backend/src/pty/runtime/PiRuntime.test.ts`
-
-Testare PiRuntime in isolazione:
-- `spawn` invoca `pty.spawn` con gli argomenti corretti
-- `write` scrive nel PTY
-- `inject` fa bracketed paste
-- `kill` termina il PTY
-- `resize` ridimensiona il PTY
-- Il callback `onReady` NON viene invocato automaticamente (deve arrivare da `markReady` esterno)
-- Il callback `onExit` viene invocato quando il PTY esce
+### 2.5 — `backend/src/pty/runtime/PiRuntime.test.ts`
+`spawn` invoca `pty.spawn` con args corretti; `write` scrive; `inject` = paste+settle+`\r`; `kill` termina; `resize` ridimensiona ed è la fonte di `size()`; `onReady` NON automatico (arriva da `markReady`); `onExit` invocato all'uscita.
 
 ### 2.6 — Validazione
-
 ```bash
-npm test --workspaces --if-present
-npx tsc --noEmit -p backend
-npx tsc --noEmit -p frontend
+npm test --workspaces --if-present && npx tsc --noEmit -p backend && npx tsc --noEmit -p frontend
 ```
-
-**Gate:** TUTTI i test passano. Nessun cambio di comportamento osservabile. PtyHub è più piccolo ma funziona identicamente.
+**Gate:** Tutti i test passano. Nessun cambio osservabile. PtyHub più piccolo, identico nel comportamento.
 
 ---
 
-## Fase 3 — Implementare HermesRuntime (dietro feature flag)
+## Fase 3 — HermesRuntime + plugin `orchestra` (dietro feature flag)
 
-**Obiettivo:** Implementare `HermesRuntime` che si connette al TUI gateway di Hermes, senza abilitarlo nella UI.
-**Rischio:** 🟡 Medio
-**Tempo stimato:** 1-2 settimane
-**Dipendenze:** Fase 2 completata
+**Obiettivo:** un nodo `runtime: "hermes"` lancia `hermes --tui` in PTY, con parità di feature via env + plugin.
+**Rischio:** 🟡 Medio · **Tempo:** ~1 settimana · **Dipendenze:** Fase -1 (spike OK) + Fase 2
 
-### 3.1 — Ricerca API Hermes TUI Gateway
+### 3.1 — `backend/src/pty/runtime/HermesRuntime.ts`
+Sottoclasse di `PtyRuntime` (o `INodeRuntime` diretto). Differenze rispetto a `PiRuntime`:
+- **Comando:** risolve `hermes` su PATH (con i fallback per-OS, come `resolvePiCommand`).
+- **Args:** `--tui`, `--toolsets "<lista>"`. (Niente `--system-prompt`/`--extension`: usano env + plugin.)
+- **Env aggiuntive:** `HERMES_EPHEMERAL_SYSTEM_PROMPT=<systemPrompt>` (il ruolo, per-processo → isolato per nodo, **come `--system-prompt` di pi**); più le `PINODES_ORCHESTRA_*` già presenti.
+- **inject/resize/kill/write:** identici a PiRuntime (è un PTY). Bracketed paste + settle + `\r`.
+- **Ready:** vedi 3.4 (arriva dal plugin via `/internal/ready`).
 
-Prima di scrivere codice, verificare con precisione:
-- L'endpoint WebSocket del TUI gateway (formato, handshake, auth)
-- I metodi JSON-RPC disponibili (`prompt.submit`, `session.steer`, `session.interrupt`, etc.)
-- Il formato degli eventi di stream (output, tool calls, thinking)
-- Il segnale di "session ready"
-- Il segnale di "session exit"
-- La gestione degli errori
+### 3.2 — Plugin Hermes `~/.hermes/plugins/orchestra/`
+Equivalente di `call-agent.ts`. File: `plugin.yaml`, `__init__.py`, `schemas.py`, `tools.py`. **Auto-disabilitato se `PINODES_ORCHESTRA_NODE` assente nell'env.** Legge `PINODES_ORCHESTRA_URL/_BOARD/_NODE/_TOKEN`.
 
-**Azione:** Leggere la documentazione aggiornata di Hermes, possibilmente testare manualmente con `hermes dashboard --tui` e un client WS.
+| Componente | Hook/Tool | Azione |
+|---|---|---|
+| Ready | `on_session_start` | `POST /internal/ready` |
+| Context per-turno | `pre_llm_call` | `GET /internal/orchestra-context` → ritorna `{"context": "<appendix>"}` |
+| Handoff | tool **`orchestra_handoff`** (args: `recipient`, `message`) | `POST /internal/call-agent` |
+| Kanban | tool **`orchestra_card`** (args: `column`) | `POST /internal/card-status` |
+| Watchdog (segnale) | `post_llm_call` | `POST /internal/turn-ended { handoffCalledThisTurn }` |
 
-### 3.2 — Implementare HermesRuntime
+**Dove vive il plugin:** bundle dentro `backend/hermes-plugins/orchestra/`, installato/symlinkato in `~/.hermes/plugins/` da `HermesRuntime.spawn` (o da uno step di setup) la prima volta. Documentare il side-effect (scrittura in `~/.hermes/`), a differenza di pi che passa `--extension <path>` per-spawn.
 
-**File Nuovo:** `backend/src/pty/runtime/HermesRuntime.ts`
+### 3.3 — Endpoint backend `POST /internal/turn-ended`
+Nuovo endpoint runtime-agnostic. Per un nodo non-final che ha finito il turno senza `orchestra_handoff`: il backend **inietta un nudge via PTY** (riusa `scheduleInject`/`inject`), fino a `MAX_STEER_RETRIES`; superato il cap → `node_status: error` (come oggi via `/internal/handoff-failed`). Per pi questo endpoint non è usato (pi ha il watchdog in-process); è additivo, non cambia il flusso pi.
 
-Implementare `INodeRuntime`:
-
-```typescript
-export class HermesRuntime implements INodeRuntime {
-  private ws: WebSocket | null = null;
-  private sessionId: string | null = null;
-  // ...
-
-  spawn(config: RuntimeSpawnConfig): void {
-    // 1. Connetti a hermes dashboard WS (configurazione da env o runtimeConfig)
-    // 2. Crea una nuova sessione Hermes
-    // 3. Sottometti il system prompt
-    // 4. Registra handler per eventi stream → config.onOutput
-    // 5. Registra handler per session ready → config.onReady
-    // 6. Registra handler per session exit → config.onExit
-  }
-
-  write(data: string): void {
-    // Forward keystrokes? O gestire solo inject via JSON-RPC?
-    // Da verificare con l'API Hermes
-  }
-
-  inject(message: string): void {
-    // prompt.submit via JSON-RPC
-  }
-
-  resize(cols: number, rows: number): void {
-    // Potrebbe non essere necessario — da verificare
-  }
-
-  kill(): void {
-    // session.interrupt + chiudi WS
-  }
-  // ...
-}
-```
-
-### 3.3 — Integrazione con PtyHub (dietro flag)
-
-**File:** `backend/src/pty/PtyHub.ts`
-
-Modificare il punto di creazione runtime:
-
+### 3.4 — Integrazione con PtyHub (dietro flag)
 ```typescript
 // In spawn():
-const runtime = node?.runtime === "hermes" && process.env.PINODES_ORCHESTRA_HERMES === "true"
-  ? new HermesRuntime()
-  : new PiRuntime();  // default
+const runtime =
+  node?.runtime === "hermes" && process.env.PINODES_ORCHESTRA_HERMES === "true"
+    ? new HermesRuntime()
+    : new PiRuntime(); // default
 ```
+Flag `PINODES_ORCHESTRA_HERMES` spento di default → produzione invariata anche se `runtime: "hermes"` è nel grafo (degrada o segnala chiaramente).
 
-**Principio:** Il flag `PINODES_ORCHESTRA_HERMES` è spento per default. Se spento, il comportamento è identico a oggi anche se `runtime: "hermes"` è nel grafo.
+### 3.5 — Ready protocol
+`on_session_start` del plugin → `POST /internal/ready` → `PtyHub.markReady()`. Il guard `READY_FALLBACK_MS` copre il caso in cui il plugin non sia installato/non risponda.
 
-### 3.4 — Handoff per Hermes
+### 3.6 — Test
+- **`HermesRuntime.test.ts`:** `spawn` invoca `pty.spawn` con `hermes --tui` + `HERMES_EPHEMERAL_SYSTEM_PROMPT` nell'env; inject/kill/resize come PiRuntime; output→`onOutput`; exit→`onExit`.
+- **Plugin (test Python isolato, opzionale):** `orchestra_handoff` fa la POST attesa; `pre_llm_call` ritorna il context; tutto no-op senza `PINODES_ORCHESTRA_NODE`.
+- **`PtyHub.test.ts`:** nodo `runtime: "hermes"` (flag on) usa HermesRuntime; `pi`/assente usa PiRuntime; grafi misti pi↔hermes (delivery via `/internal/call-agent` invariato); `POST /internal/turn-ended` inietta nudge e dopo il cap segna error.
 
-**File Nuovo:** `backend/src/pty/runtime/hermes-handoff.ts` (o dentro HermesRuntime)
-
-Due strategie:
-
-**A. Stream parsing (primario):**
-- HermesRuntime intercetta gli eventi di stream dal gateway
-- Cerca `@@HANDOFF:handle` nel testo dell'output
-- Quando trovato, chiama il callback che porta a `deliverCall()` di PtyHub
-
-**B. Hermes Skill (futuro, miglioramento):**
-- Registra un tool Hermes `orchestra_handoff` che chiama `POST /internal/call-agent`
-- Più robusto, ma richiede supporto custom skills in Hermes
-
-### 3.5 — Ready protocol per Hermes
-
-- HermesRuntime ascolta l'evento "session ready" dal gateway
-- Quando ricevuto, invoca il callback `onReady` → PtyHub.markReady()
-- Fallback timeout già implementato in PtyHub (READY_FALLBACK_MS)
-
-### 3.6 — Test: HermesRuntime isolato
-
-**File Nuovo:** `backend/src/pty/runtime/HermesRuntime.test.ts`
-
-Mock del WebSocket gateway:
-- `spawn` crea una connessione WS e invia il messaggio di creazione sessione
-- `inject` invia `prompt.submit` via JSON-RPC
-- `kill` invia `session.interrupt` e chiude la connessione
-- Eventi stream vengono forwardati al callback `onOutput`
-- Evento ready viene forwardato al callback `onReady`
-- Evento exit viene forwardato al callback `onExit`
-- Connessione persa → callback `onError` + `onExit`
-
-### 3.7 — Test: integrazione con PtyHub
-
-**File:** `backend/src/pty/PtyHub.test.ts`
-
-Aggiungere test con HermesRuntime mockato:
-- Un nodo con `runtime: "hermes"` usa HermesRuntime
-- Un nodo con `runtime: "pi"` (o senza runtime) usa PiRuntime
-- Grafi misti: nodo A è pi, nodo B è hermes, handoff A→B funziona
-- Grafi misti: handoff B→A funziona
-
-### 3.8 — Validazione
-
+### 3.7 — Validazione
 ```bash
-npm test --workspaces --if-present
-npx tsc --noEmit -p backend
-npx tsc --noEmit -p frontend
+npm test --workspaces --if-present && npx tsc --noEmit -p backend && npx tsc --noEmit -p frontend
 ```
-
-**Gate:** Tutti i test passano. HermesRuntime è implementato ma dietro feature flag. Il sistema in produzione funziona come oggi (flag spento).
+**Gate:** Tutti i test passano. Hermes dietro flag. Produzione invariata.
 
 ---
 
-## Fase 4 — Frontend: Runtime Selector e Badge
+## Fase 4 — Frontend: Runtime Selector e Badge (basso, xterm invariato)
 
-**Obiettivo:** Aggiungere la UI per selezionare e visualizzare il runtime dei nodi.
-**Rischio:** 🟢 Basso
-**Tempo stimato:** 3-5 giorni
-**Dipendenze:** Fase 0 completata (il campo `runtime` è nei tipi)
+**Obiettivo:** UI per selezionare/visualizzare il runtime. **xterm renderizza Hermes come pi → nessun lavoro di rendering.**
+**Rischio:** 🟢 Basso · **Tempo:** 3-5 gg · **Dipendenze:** Fase 0
 
-### 4.1 — Test: runtimeStore con runtime field
-
-**File:** `frontend/src/stores/runtimeStore.test.ts`
-
-Verificare:
-- Il runtime è tracciato nel node status
-- Il runtime è presente nei board snapshot
-
-### 4.2 — NodeInspector: dropdown runtime
-
-**File:** `frontend/src/components/NodeInspector.tsx`
-
-Aggiungere:
-- Dropdown per selezionare `runtime` ("pi" / "hermes") quando si modifica un nodo
-- Mostrare il dropdown solo se `PINODES_ORCHESTRA_HERMES` è abilitato (o sempre, con "pi" come default)
-- Campi di configurazione runtime-specifici (es. URL gateway per Hermes)
-
-### 4.3 — AgentNode: badge runtime
-
-**File:** `frontend/src/components/AgentNode.tsx`
-
-Aggiungere:
-- Piccolo badge/icona accanto al nome del nodo che indica il runtime
-- Label "Restart pi…" → "Restart {runtime}…" dinamico
-
-### 4.4 — TerminalPanel: label dinamica
-
-**File:** `frontend/src/components/TerminalPanel.tsx`
-
-- Header: label "pi" → "{runtime}" basato sul nodo selezionato
-- Messaggio "pi session ended" → "{runtime} session ended"
-
-### 4.5 — NodeTerminal: overlay dinamico
-
-**File:** `frontend/src/components/NodeTerminal.tsx`
-
-- "starting pi…" → "starting {runtime}…" basato sul `data.runtime` del nodo
-
-### 4.6 — Validazione
-
-```bash
-npm test --workspaces --if-present
-npx tsc --noEmit -p frontend
-```
-
-**Gate:** Tutti i test passano. La UI mostra il runtime solo se il campo è presente nel grafo.
+- **4.1** `runtimeStore.test.ts`: runtime tracciato nel node status e negli snapshot.
+- **4.2** `NodeInspector.tsx`: dropdown `runtime` ("pi"/"hermes", default "pi"); campi `runtimeConfig` **non segreti** (es. modello/toolset).
+- **4.3** `AgentNode.tsx`: badge/icona runtime; "Restart pi…" → "Restart {runtime}…".
+- **4.4** `TerminalPanel.tsx`: header "pi" → "{runtime}"; "pi session ended" → "{runtime} session ended".
+- **4.5** `NodeTerminal.tsx`: "starting pi…" → "starting {runtime}…" da `data.runtime`.
+- **4.6** Validazione: `npm test --workspaces --if-present && npx tsc --noEmit -p frontend`.
 
 ---
 
 ## Fase 5 — Test End-to-End e Integrazione
 
-**Obiettivo:** Verificare che l'intero sistema funzioni con grafi misti.
-**Rischio:** 🟡 Medio
-**Tempo stimato:** 3-5 giorni
-**Dipendenze:** Fasi 2, 3, 4 completate
+**Obiettivo:** sistema funzionante con grafi misti. **Rischio:** 🟡 Medio · **Tempo:** 3-5 gg · **Dipendenze:** Fasi 2,3,4
 
-### 5.1 — Test E2E: grafo misto pi + hermes
-
-Scenario di test:
-1. Creare un board con 2 nodi: Architect (pi) e Developer (hermes)
-2. Collegarli con un edge (Architect → Developer)
-3. Avviare un task sull'Architect
-4. Verificare che l'Architect (pi) funzioni come oggi
-5. Verificare che l'Architect handoff al Developer (hermes)
-6. Verificare che il Developer (hermes) riceva il task e lavori
-7. Verificare che il Developer possa chiudere con @@DONE
-
-### 5.2 — Test E2E: fallback graceful
-
-Scenario:
-1. Nodo Hermes con `hermes dashboard` NON attivo
-2. Verificare che il nodo entra in stato `error` con messaggio chiaro
-3. Verificare che gli altri nodi (pi) continuano a funzionare
-
-### 5.3 — Test E2E: restart e kill
-
-Scenario:
-1. Nodo Hermes in running → restart → verificare nuova sessione
-2. Nodo Hermes in running → stop → verificare cleanup
-3. Board stop → verificare che tutti i nodi (pi e hermes) vengono fermati
-
-### 5.4 — Test regression: pi-only (nessuna regressione)
-
-Scenario:
-1. Creare un board con solo nodi pi (come oggi)
-2. Eseguire un flow completo con handoff
-3. Verificare che tutto funziona esattamente come prima
-
-### 5.5 — Validazione finale
-
-```bash
-npm test --workspaces --if-present
-npx tsc --noEmit -p backend
-npx tsc --noEmit -p frontend
-npm run build
-```
-
-**Gate:** Tutti i test passano. Il build produce un artefatto funzionante. Nessuna regressione su nodi pi.
+- **5.1 Grafo misto pi+hermes:** Architect (pi) → Developer (hermes). Avvio task sull'Architect; handoff a Developer; il Developer (hermes) riceve e lavora; chiude con `orchestra_handoff`/done.
+- **5.2 Watchdog Hermes:** nodo Hermes non-final che finisce senza handoff → nudge via PTY → dopo il cap → `error`.
+- **5.3 Fallback graceful:** `hermes` non installato / plugin assente → nodo in `error` con messaggio chiaro; gli altri nodi continuano.
+- **5.4 Restart/kill:** Hermes running → restart → nuova sessione; → stop → cleanup; board stop → tutti fermati.
+- **5.5 Regression pi-only:** board di soli nodi pi, flow completo con handoff → tutto come prima.
+- **5.6 Validazione finale:** `npm test --workspaces --if-present && npx tsc --noEmit -p backend && npx tsc --noEmit -p frontend && npm run build`.
 
 ---
 
 ## Fase 6 — Abilitazione e Documentazione
 
-**Obiettivo:** Rendere il runtime Hermes disponibile agli utenti.
-**Rischio:** 🟢 Basso
-**Tempo stimato:** 2-3 giorni
-**Dipendenze:** Fase 5 completata
+**Rischio:** 🟢 Basso · **Tempo:** 2-3 gg · **Dipendenze:** Fase 5
 
-### 6.1 — Rimuovere il feature flag (o renderlo opt-in nella UI)
-
-- Opzione A: Mantenere `PINODES_ORCHESTRA_HERMES` come env var, documentare nel README
-- Opzione B: Aggiungere un toggle nella UI (Settings)
-- Raccomandazione: Opzione A inizialmente, B in un secondo momento
-
-### 6.2 — Aggiornare la documentazione
-
-- `README.md`: aggiungere sezione "Hermes runtime nodes"
-- `ARCHITECTURE.md`: aggiornare la sezione "Runtime types" (Hermes da 🔜 a ✅)
-- `docs/HERMES_DESKTOP.md`: aggiornare le fasi H1/H2/H3
-- `docs/PROGRAMMATIC_API.md`: aggiornare la sezione "node runtime field"
-- `EXTENSIONS_ROADMAP.md`: aggiornare la roadmap
-
-### 6.3 — Validazione
-
-```bash
-npm test --workspaces --if-present
-npm run build
-```
+- **6.1** Feature flag: `PINODES_ORCHESTRA_HERMES` documentato nel README (poi eventuale toggle UI).
+- **6.2** Docs: README (sezione "Hermes runtime nodes" + requisito `hermes` installato + setup plugin); ARCHITECTURE.md (Runtime types: Hermes 🔜→✅, tabella metodi); correggere la contraddizione xterm/ANSI in `HERMES_DESKTOP.md` e `HERMES_TUI_IMPACT_ANALYSIS.md`; PROGRAMMATIC_API.md (`runtime`/`runtimeConfig`); SECURITY.md (§0.7); EXTENSIONS_ROADMAP.md.
+- **6.3** Validazione: `npm test --workspaces --if-present && npm run build`.
 
 ---
 
@@ -549,25 +318,28 @@ npm run build
 
 | Fase | Descrizione | Tempo | Rischio |
 |------|------------|-------|---------|
-| **0** | Data model (types, DB, API) | 2-3 gg | 🟢 Basso |
+| **-1** | Spike di validazione (2 verifiche dal vivo) | 0.5 gg | 🟢 Nullo |
+| **0** | Data model (types, DB, API, vincolo token) | 2-3 gg | 🟢 Basso |
 | **1** | Test di protezione per PtyHub | 2-3 gg | 🟢 Basso |
 | **2** | Estrazione INodeRuntime + PiRuntime | 1 sett | 🟡 Medio |
-| **3** | HermesRuntime + handoff + ready | 1-2 sett | 🟡 Medio |
+| **3** | HermesRuntime + plugin orchestra + watchdog | 1 sett | 🟡 Medio |
 | **4** | Frontend: selector, badge, label | 3-5 gg | 🟢 Basso |
 | **5** | Test E2E e regression | 3-5 gg | 🟡 Medio |
 | **6** | Abilitazione e docs | 2-3 gg | 🟢 Basso |
-| **Totale** | | **~4-6 settimane** | **🟡 Medio** |
+| **Totale** | | **~3-4 settimane** | **🟡 Medio** |
+
+> Le Fasi 0-1-2 (~2 settimane) valgono **a prescindere** da Hermes: estrarre `PiRuntime` è un refactoring sano che abilita anche Cursor/OpenClaw.
 
 ---
 
 ## Checklist di Sicurezza (per ogni fase)
 
 - [ ] Tutti i test esistenti passano (`npm test --workspaces --if-present`)
-- [ ] Typecheck backend passa (`npx tsc --noEmit -p backend`)
-- [ ] Typecheck frontend passa (`npx tsc --noEmit -p frontend`)
+- [ ] Typecheck backend e frontend passano
 - [ ] Build produce artefatto (`npm run build`)
-- [ ] Nessun cambio di comportamento osservabile (per fasi 0-2)
-- [ ] Feature flag spento = comportamento identico a oggi (per fasi 3-5)
+- [ ] Nessun cambio osservabile (fasi 0-2)
+- [ ] Feature flag spento = comportamento identico a oggi (fasi 3-5)
+- [ ] Nessun segreto in `runtimeConfig`/grafo (§0.7)
 - [ ] Commit piccolo e revertibile
 - [ ] Ogni sotto-fase ha i propri test PRIMA dell'implementazione
 
@@ -577,19 +349,41 @@ npm run build
 
 | Rischio | Probabilità | Impatto | Mitigazione |
 |---------|-------------|---------|-------------|
-| Refactoring PtyHub rompe pi | Media | Alto | Fase 1: test di protezione PRIMA del refactoring. Fase 2: spostare codice, non riscriverlo |
-| API Hermes TUI gateway instabile | Media | Medio | Feature flag: Hermes è opzionale, pi funziona sempre |
-| Hermes non attivo → nodi bloccati | Alta | Basso | Fallback graceful con messaggio errore chiaro |
-| Complessità operativa (due runtime) | Bassa | Medio | Documentazione chiara, setup separato per ogni runtime |
-| Performance: doppio runtime | Bassa | Basso | Ogni runtime è indipendente, nessuna contention |
+| `HERMES_EPHEMERAL_SYSTEM_PROMPT` solo primo turno | Media | Basso | Ripiego: ruolo via `pre_llm_call` (gira ogni turno). Verificato nello spike |
+| Bracketed-paste nella TUI inaffidabile | Bassa | Medio | Verificato nello spike; fallback: API di input alternativa della TUI |
+| Refactoring PtyHub rompe pi | Media | Alto | Fase 1 (test di protezione) prima del refactor; Fase 2 sposta codice, non riscrive |
+| Plugin globale disturba l'Hermes dell'utente | Media | Medio | Auto-disabilita senza `PINODES_ORCHESTRA_NODE`; gate `requires_env` |
+| Watchdog non implementabile via hook | Certa | Basso | Già risolto: nudge via PTY su segnale `post_llm_call` |
+| `hermes` non installato → nodi bloccati | Media | Basso | Fallback graceful con messaggio chiaro; flag spento di default |
+| Segreto (token) persistito nel grafo | Media | Alto | §0.7: credenziali in `~/.hermes/`/env, mai in `runtimeConfig` |
 
 ---
 
 ## Cosa NON Fare
 
-1. **Non riscrivere PtyHub da zero** — spostare codice, non riscriverlo
-2. **Non rimuovere call-agent.ts** — resta per i nodi pi, Hermes ha il suo meccanismo
-3. **Non cambiare il protocollo @@HANDOFF** — è universale e funziona già
-4. **Non cambiare la WebSocket protocol** — i messaggi esistenti sono invariati
-5. **Non abilitare Hermes per default** — feature flag spento fino a maturità
-6. **Non implementare tutto in un colpo solo** — fasi incrementali, ognuna revertibile
+1. **Non reintrodurre il path gateway/JSON-RPC** — scartato; Hermes gira in PTY come pi
+2. **Non riscrivere PtyHub da zero** — spostare codice, non riscriverlo
+3. **Non rimuovere call-agent.ts** — resta per i nodi pi; Hermes usa il plugin
+4. **Non cambiare il protocollo @@HANDOFF / gli endpoint `/internal/*`** — sono universali; `/internal/turn-ended` è additivo
+5. **Non cambiare la WebSocket protocol** esistente — i messaggi attuali sono invariati
+6. **Non mettere segreti nel grafo** — credenziali in `~/.hermes/`/env (§0.7)
+7. **Non far agire il plugin su sessioni Hermes non-Orchestra** — gate su `PINODES_ORCHESTRA_NODE`
+8. **Non abilitare Hermes per default** — feature flag spento fino a maturità
+9. **Non implementare tutto in un colpo solo** — fasi incrementali, ognuna revertibile
+
+---
+
+## Changelog revisione
+
+**v3 (2026-06-29) — dopo indagine sul web:**
+1. **Architettura decisa: PATH A** (`hermes --tui` in PTY). Path gateway/JSON-RPC **scartato** (confermato che la TUI è self-contained e renderizza ANSI → xterm gratis).
+2. **Mappatura pi→Hermes completa** via plugin Hermes: `HERMES_EPHEMERAL_SYSTEM_PROMPT` (system prompt per-nodo, come `--system-prompt`), `on_session_start` (ready), `pre_llm_call` (context per-turno), tool `orchestra_handoff`/`orchestra_card`, `post_llm_call` (watchdog).
+3. **System prompt per-nodo isolato confermato:** env var per-processo, come pi. Ogni istanza `hermes --tui` ha il suo prompt per tutta la vita, senza toccare `~/.hermes/SOUL.md` globale.
+4. **Watchdog risolto:** gli hook Hermes non possono iniettare follow-up → si usa il PTY (nudge via `scheduleInject` su segnale `post_llm_call` → `/internal/turn-ended`).
+5. **Isolamento plugin:** globale in `~/.hermes/plugins/` ma auto-disabilitato senza `PINODES_ORCHESTRA_NODE`.
+6. **Spike ridotto a 0.5 gg** (2 verifiche dal vivo), non più decisione d'architettura.
+7. **Stima rivista a ~3-4 settimane** (path A), Frontend tornato 🟢 basso (xterm invariato).
+
+**v2 (2026-06-29):** prima revisione contro il codice — aggiunto spike, corretta contraddizione xterm/ANSI, risolta incoerenza READY_*, esplicitate lacune feature-parity, vincolo sicurezza, lista metodi runtime-agnostic, ri-stime.
+
+**v1 (2026-06-28):** piano iniziale (6 fasi, assunzione gateway implicita).
