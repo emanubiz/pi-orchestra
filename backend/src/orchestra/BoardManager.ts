@@ -239,6 +239,8 @@ export class BoardManager {
     if (patch.promptId !== undefined) updatedNode.promptId = patch.promptId;
     if (patch.promptOverride !== undefined) updatedNode.promptOverride = patch.promptOverride;
     if (patch.canBeFinal !== undefined) updatedNode.canBeFinal = patch.canBeFinal;
+    if (patch.runtime !== undefined) updatedNode.runtime = patch.runtime;
+    if (patch.runtimeConfig !== undefined) updatedNode.runtimeConfig = patch.runtimeConfig;
     if (patch.position !== undefined) updatedNode.position = patch.position;
 
     const nextGraph: WorkflowGraph = {

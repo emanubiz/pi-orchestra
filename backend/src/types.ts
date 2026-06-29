@@ -1,5 +1,8 @@
 export type NodeStatus = "idle" | "running" | "done" | "error";
 
+/** Which agent runtime backs a node's PTY. Absent === "pi" (backward compat). */
+export type NodeRuntime = "pi" | "hermes";
+
 export interface WorkflowGraph {
   id?: string;
   name: string;
@@ -17,6 +20,12 @@ export interface WorkflowNode {
   /** Whether this node may end the chain. Undefined/null === true (can end).
    * When false, the agent is told it MUST hand off to a connected node. */
   canBeFinal?: boolean | null;
+  /** Agent runtime backing this node. Undefined/absent === "pi" (default). */
+  runtime?: NodeRuntime;
+  /** Non-secret runtime parameters (model, toolset, flags). NEVER store secrets
+   * here — runtimeConfig is persisted to SQLite and broadcast to the browser.
+   * Credentials live in the runtime's own config (e.g. ~/.hermes/) or env. */
+  runtimeConfig?: Record<string, unknown>;
   position: { x: number; y: number };
 }
 

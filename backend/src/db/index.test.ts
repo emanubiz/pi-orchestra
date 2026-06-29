@@ -54,6 +54,47 @@ describe("board persistence", () => {
     expect(getBoard("b1")?.graph).toEqual(graph);
   });
 
+  it("preserves the node runtime field across save and read", async () => {
+    const { createBoard, saveBoardGraph, getBoard } = await loadDb();
+    createBoard("b1", "/tmp", "Test");
+    const graph = {
+      name: "g",
+      cwd: "/tmp",
+      entryNodeId: "n1",
+      nodes: [
+        // pi runtime, explicit
+        {
+          id: "n1",
+          label: "Architect",
+          promptId: "p1",
+          runtime: "pi" as const,
+          position: { x: 0, y: 0 },
+        },
+        // hermes runtime + non-secret runtimeConfig
+        {
+          id: "n2",
+          label: "Developer",
+          promptId: "p2",
+          runtime: "hermes" as const,
+          runtimeConfig: { toolsets: "read,bash,edit" },
+          position: { x: 100, y: 0 },
+        },
+        // no runtime (backward compat) — must round-trip untouched
+        { id: "n3", label: "Reviewer", promptId: "p3", position: { x: 200, y: 0 } },
+      ],
+      edges: [],
+    };
+    const updated = saveBoardGraph("b1", graph);
+    expect(updated?.graph).toEqual(graph);
+    const read = getBoard("b1")?.graph;
+    expect(read).toEqual(graph);
+    expect(read?.nodes[0].runtime).toBe("pi");
+    expect(read?.nodes[1].runtime).toBe("hermes");
+    expect(read?.nodes[1].runtimeConfig).toEqual({ toolsets: "read,bash,edit" });
+    expect(read?.nodes[2].runtime).toBeUndefined();
+    expect(read?.nodes[2].runtimeConfig).toBeUndefined();
+  });
+
   it("returns undefined for unknown board", async () => {
     const { getBoard, saveBoardGraph, deleteBoard } = await loadDb();
     expect(getBoard("missing")).toBeUndefined();

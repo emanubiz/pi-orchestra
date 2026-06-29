@@ -1,5 +1,8 @@
 export type NodeStatus = "idle" | "running" | "done" | "error";
 
+/** Which agent runtime backs a node's PTY. Absent === "pi" (backward compat). */
+export type NodeRuntime = "pi" | "hermes";
+
 export interface SystemPrompt {
   id: string;
   name: string;
@@ -38,6 +41,8 @@ export interface WorkflowGraph {
     promptId: string;
     promptOverride?: string | null;
     canBeFinal?: boolean | null;
+    runtime?: NodeRuntime;
+    runtimeConfig?: Record<string, unknown>;
     position: { x: number; y: number };
   }>;
   edges: Array<{
