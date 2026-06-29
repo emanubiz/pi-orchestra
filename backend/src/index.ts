@@ -17,6 +17,10 @@ import {
 } from "./db/index.js";
 import { ptyHub } from "./pty/PtyHub.js";
 import { orchestraRoutes } from "./routes/orchestra.js";
+
+/** Per-node retry counter for the determinism watchdog (Hermes turn-ended path). */
+const turnEndedRetries = new Map<string, number>();
+const MAX_STEER_RETRIES = 3;
 import type { WorkflowGraph } from "./types.js";
 import {
   buildAllowedOrigins,
@@ -125,6 +129,48 @@ app.post<{ Body: { boardId: string; nodeId: string } }>(
     return { ok: true };
   },
 );
+
+// Hermes post_llm_call hook: the agent finished a turn. If it was a non-final
+// node that didn't call orchestra_handoff, the backend injects a nudge into the
+// PTY (up to MAX_STEER_RETRIES). This is the Hermes equivalent of pi's watchdog.
+app.post<{
+  Body: { boardId: string; nodeId: string; handoffCalledThisTurn: boolean };
+}>("/internal/turn-ended", async (req) => {
+  const { boardId, nodeId, handoffCalledThisTurn } = req.body;
+  const ctx = ptyHub.orchestraContext(boardId, nodeId);
+  if (!ctx || ctx.canBeFinal) return { ok: true };
+  if (handoffCalledThisTurn) {
+    turnEndedRetries.delete(`${boardId}:${nodeId}`);
+    return { ok: true };
+  }
+
+  // Non-final node that didn't hand off — nudge it.
+  const key = `${boardId}:${nodeId}`;
+  const retries = (turnEndedRetries.get(key) ?? 0) + 1;
+  turnEndedRetries.set(key, retries);
+  if (retries > MAX_STEER_RETRIES) {
+    turnEndedRetries.delete(key);
+    ptyHub.notify({
+      type: "node_status",
+      boardId,
+      nodeId,
+      status: "error",
+      message:
+        `Handoff not completed after ${MAX_STEER_RETRIES} retries. ` +
+        `Expected the agent to call orchestra_handoff or end with DONE.`,
+    });
+    return { ok: true, retries, exceeded: true };
+  }
+  const targets = ctx.outgoing.map((t) => t.handle).join(", ");
+  ptyHub.injectTask(
+    boardId,
+    nodeId,
+    `[orchestra] You must hand off or end your turn. ` +
+      `Use the orchestra_handoff tool to delegate to one of: ${targets}. ` +
+      `(Attempt ${retries}/${MAX_STEER_RETRIES})`,
+  );
+  return { ok: true, retries };
+});
 
 // The determinism watchdog gave up after retries — surface it on the node card.
 app.post<{

@@ -5,8 +5,9 @@ import { onNodeReady, onPtyOutput, onPtySize } from "../lib/ptyBus";
 import { TERM_FONT, TERM_THEME, useTerminalBridge } from "../lib/termTheme";
 import { useRuntimeStore } from "../stores/runtimeStore";
 
-/** Live, read-only mini view of a node's pi terminal, embedded in its card. */
-export function NodeTerminal({ nodeId, restarting }: { nodeId: string; restarting?: boolean }) {
+/** Live, read-only mini view of a node's terminal, embedded in its card. */
+export function NodeTerminal({ nodeId, restarting, runtime }: { nodeId: string; restarting?: boolean; runtime?: string }) {
+  const rt = runtime ?? "pi";
   const { boardId, send } = useTerminalBridge();
   const cardRef = useRef<HTMLDivElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -110,14 +111,14 @@ export function NodeTerminal({ nodeId, restarting }: { nodeId: string; restartin
       <div ref={hostRef} style={{ pointerEvents: "none", width: "max-content" }} />
       {!live && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[10px] text-zinc-600">
-          starting pi…
+          starting {rt}…
         </div>
       )}
       {restarting && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center gap-1.5 bg-black/60 backdrop-blur-[1px]">
           <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-400 animate-ping" />
           <span className="text-[10px] font-medium tracking-wide text-amber-400/90">
-            restarting pi…
+            restarting {rt}…
           </span>
         </div>
       )}

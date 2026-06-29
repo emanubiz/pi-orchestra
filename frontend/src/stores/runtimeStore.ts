@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { ChatLine, NodeStatus, SystemPrompt, WorkflowGraph } from "../types";
+import type { ChatLine, NodeRuntime, NodeStatus, SystemPrompt, WorkflowGraph } from "../types";
 
 function nodeKey(boardId: string, nodeId: string): string {
   return `${boardId}:${nodeId}`;
@@ -151,6 +151,8 @@ export function graphFromFlow(
       promptId: string;
       promptOverride?: string;
       canBeFinal?: boolean;
+      runtime?: NodeRuntime;
+      runtimeConfig?: Record<string, unknown>;
     };
   }>,
   edges: Array<{ id: string; source: string; target: string }>,
@@ -170,6 +172,8 @@ export function graphFromFlow(
       promptId: n.data.promptId,
       promptOverride: n.data.promptOverride ?? null,
       canBeFinal: n.data.canBeFinal ?? null,
+      runtime: n.data.runtime ?? undefined,
+      runtimeConfig: n.data.runtimeConfig ?? undefined,
       position: n.position,
     })),
     edges: edges.map((e) => ({

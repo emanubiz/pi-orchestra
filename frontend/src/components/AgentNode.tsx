@@ -1,6 +1,6 @@
 import { memo } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { Flag, FlagOff, Maximize2, RefreshCw, ScrollText, ShieldCheck, ShieldOff, Trash2 } from "lucide-react";
+import { Cpu, Flag, FlagOff, Maximize2, RefreshCw, ScrollText, ShieldCheck, ShieldOff, Trash2 } from "lucide-react";
 import type { WorkflowNodeData, NodeStatus } from "../types";
 import { NodeTerminal } from "./NodeTerminal";
 import { useTerminalBridge } from "../lib/termTheme";
@@ -138,6 +138,21 @@ function AgentNodeComponent({ id, data, selected }: NodeProps & { data: Workflow
         >
           <Maximize2 size={12} strokeWidth={2} />
         </button>
+        {/* runtime badge */}
+        <span
+          className={`shrink-0 rounded px-1 py-0 text-[9px] font-medium tracking-wide ${
+            (data.runtime ?? "pi") === "hermes"
+              ? "text-purple-400/80 bg-purple-500/10"
+              : "text-zinc-500 bg-white/5"
+          }`}
+          title={`Runtime: ${data.runtime ?? "pi"}`}
+        >
+          {(data.runtime ?? "pi") === "hermes" ? (
+            <span className="flex items-center gap-0.5"><Cpu size={9} strokeWidth={2} />hm</span>
+          ) : (
+            "pi"
+          )}
+        </span>
         <button
           type="button"
           className={`nodrag shrink-0 rounded p-0.5 transition-colors ${
@@ -145,7 +160,7 @@ function AgentNodeComponent({ id, data, selected }: NodeProps & { data: Workflow
               ? "text-amber-400/80 animate-pulse"
               : "text-zinc-500 hover:bg-white/5 hover:text-zinc-200"
           }`}
-          title={restarting ? "Restarting pi…" : "Restart pi (pick up config/extension changes)"}
+          title={restarting ? `Restarting ${data.runtime ?? "pi"}…` : `Restart ${data.runtime ?? "pi"} (pick up config/extension changes)`}
           disabled={restarting}
           onClick={(e) => {
             e.stopPropagation();
@@ -182,7 +197,7 @@ function AgentNodeComponent({ id, data, selected }: NodeProps & { data: Workflow
 
       {/* live mini pi terminal */}
       <div className="h-[150px] bg-black">
-        <NodeTerminal nodeId={id} restarting={restarting} />
+        <NodeTerminal nodeId={id} restarting={restarting} runtime={data.runtime} />
       </div>
 
       <Handle

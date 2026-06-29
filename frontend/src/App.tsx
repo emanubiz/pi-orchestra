@@ -209,6 +209,8 @@ export function App() {
         promptId: n.promptId,
         status: "idle" as const,
         promptOverride: n.promptOverride ?? undefined,
+        runtime: n.runtime ?? undefined,
+        runtimeConfig: n.runtimeConfig ?? undefined,
         isEntry: n.id === graph.entryNodeId,
         canBeFinal: n.canBeFinal ?? undefined,
       },
@@ -433,7 +435,13 @@ export function App() {
 
               <div className="flex-1 min-h-0 flex flex-col">
                 {rightTab === "terminal" && (
-                  <TerminalPanel boardId={activeBoard.id} send={send} />
+                  <TerminalPanel
+                    boardId={activeBoard.id}
+                    send={send}
+                    getSelectedNode={() =>
+                      flowRef.current?.getNode(useRuntimeStore.getState().selectedNodeId ?? "")
+                    }
+                  />
                 )}
                 {rightTab === "timeline" && (
                   <TimelinePanel

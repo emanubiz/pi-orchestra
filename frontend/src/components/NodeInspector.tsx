@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Play } from "lucide-react";
 import type { Node } from "@xyflow/react";
 import { useRuntimeStore } from "../stores/runtimeStore";
-import type { SystemPrompt, WorkflowNodeData } from "../types";
+import type { NodeRuntime, SystemPrompt, WorkflowNodeData } from "../types";
 
 interface NodeInspectorProps {
   boardId: string;
@@ -109,6 +109,22 @@ export function NodeInspector({
         }
         className="w-full rounded-lg border border-white/10 bg-zinc-950/80 px-2.5 py-1.5 text-[11px] font-mono text-zinc-300 transition-colors focus:border-zinc-500/70 focus:outline-none"
       />
+
+      {/* Runtime selector */}
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] text-zinc-500 shrink-0">Runtime:</span>
+        <select
+          value={node.data.runtime ?? "pi"}
+          onChange={(e) => {
+            const val = e.target.value as NodeRuntime;
+            onUpdateNode(selectedNodeId, { runtime: val });
+          }}
+          className="flex-1 rounded-md border border-white/10 bg-zinc-950/80 px-2 py-1 text-[11px] text-zinc-300 transition-colors focus:border-zinc-500/60 focus:outline-none"
+        >
+          <option value="pi">pi (default)</option>
+          <option value="hermes">hermes</option>
+        </select>
+      </div>
 
       <div className="flex gap-2">
         <input
