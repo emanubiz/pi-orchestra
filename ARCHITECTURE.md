@@ -88,15 +88,19 @@ PtyHub selects the runtime at spawn time:
 
 ## Handoff protocol
 
-Agents communicate through a structured handoff:
+Agents communicate through a structured handoff. The *delivery* path is identical
+across runtimes (`POST /internal/call-agent` → `PtyHub.deliverCall` → inject into
+the target PTY → broadcast a `handoff` WebSocket event for the timeline); only how
+the agent **expresses** the handoff differs by runtime:
 
-1. Agent A ends its turn with a `@@HANDOFF:<recipient-handle>` block
-2. The pi extension (or Hermes plugin) calls `POST /internal/call-agent`
-3. PtyHub resolves the recipient and injects the task into the target node's PTY
-4. A `handoff` event is broadcast via WebSocket for the timeline
+| Runtime | How the agent expresses a handoff |
+|---|---|
+| **pi** | Emits a `@@HANDOFF:<recipient-handle> … @@END` text block; the `call-agent.ts` extension parses it on `agent_end` and POSTs. Works on any provider, no tool support required. |
+| **Hermes** | Calls the **native** `orchestra_handoff(recipient, message)` tool (registered by the plugin) — function-calling, no text parsing. |
+| **Claude Code** *(planned)* | Calls the **native** `orchestra_handoff` MCP tool — same as Hermes. See [docs/CLAUDE_CODE_RUNTIME_PLAN.md](./docs/CLAUDE_CODE_RUNTIME_PLAN.md). |
 
-The same protocol works for both pi (via `call-agent.ts` extension) and Hermes
-(via `orchestra_handoff` tool in the plugin).
+The backend contract (`/internal/call-agent`, recipient resolution, the `handoff`
+event) is the same regardless of which expression the runtime uses.
 
 ## Determinism watchdog
 
