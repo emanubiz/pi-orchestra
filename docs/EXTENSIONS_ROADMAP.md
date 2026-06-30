@@ -293,7 +293,23 @@ Phase 3  🔜 Native Cursor agent nodes (`runtime: "cursor"`) — extension shel
 Phase 4  🔜 Hermes H2 embed contract + optional Desktop PR
 Phase 5  🔜 OpenClaw O2 plugin (HTTP route + gateway method)
 Phase 6  🔜 Multi-runtime adapters (Hermes, OpenClaw, Cursor nodes)
+Phase M1 🔜 Mobile Companion MVP (Pulse + Intervene) — see EXPANSION_MOBILE_AND_PHYSICAL.md
+Phase P1 🔜 PhysicalRuntime + edge device agent spec — same doc
 ```
+
+---
+
+## Future expansions (mobile & physical)
+
+Detailed vision (why / what / how, phases, API extensions, safety model):
+
+→ **[EXPANSION_MOBILE_AND_PHYSICAL.md](./EXPANSION_MOBILE_AND_PHYSICAL.md)**
+
+Summary:
+
+- **Mobile Companion** — remote client (Expo/PWA): Pulse, Intervene, Kanban, push; backend stays on dev machine/VPS; reuses programmatic API + WS.
+- **Physical Runtime** — `runtime: "physical"` nodes, edge agents on real machines, `physicalClass` + approval gates; same handoff contract as pi/Hermes.
+- **Voice** — input channel to inject/approve (not a replacement UI).
 
 ---
 
@@ -313,3 +329,4 @@ Phase 6  🔜 Multi-runtime adapters (Hermes, OpenClaw, Cursor nodes)
 - [ARCHITECTURE.md](../ARCHITECTURE.md) — current standalone design
 - [HERMES_DESKTOP.md](./HERMES_DESKTOP.md) — Hermes Desktop deep dive
 - [PROGRAMMATIC_API.md](./PROGRAMMATIC_API.md) — REST/CLI contract for hosts
+- [EXPANSION_MOBILE_AND_PHYSICAL.md](./EXPANSION_MOBILE_AND_PHYSICAL.md) — Mobile Companion + Physical Runtime vision

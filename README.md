@@ -107,6 +107,7 @@ When `PINODES_ORCHESTRA_TOKEN` is set, browser clients must provide it. The VS C
 | [docs/HERMES_DESKTOP.md](./docs/HERMES_DESKTOP.md) | Hermes Desktop analysis |
 | [docs/PROGRAMMATIC_API.md](./docs/PROGRAMMATIC_API.md) | REST/CLI API for programmatic orchestration (boards, flows, auth) |
 | [docs/MULTI_INSTANCE.md](./docs/MULTI_INSTANCE.md) | Why one backend is shared today, and the path to per-workspace isolation |
+| [docs/EXPANSION_MOBILE_AND_PHYSICAL.md](./docs/EXPANSION_MOBILE_AND_PHYSICAL.md) | Visione espansione: Mobile Companion + Physical Runtime (perché, cosa, come) |
 
 ## Built-in Prompt Library
 
