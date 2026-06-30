@@ -345,6 +345,39 @@ describe("PtyHub", () => {
     expect(replay).toBe("x".repeat(256_000));
   });
 
+  it("scrollback ring buffer matches the legacy concat+slice oracle under heavy output", () => {
+    const MAX = 256_000;
+    hub.setGraph(BOARD, graphOf({ edges: true }), "/tmp");
+    hub.ensure(BOARD, "n1", 80, 24);
+    const inst = ptyFor("n1")!;
+
+    let oracle = "";
+    const chunks = [
+      "a".repeat(100_000),
+      "b".repeat(100_000),
+      "c".repeat(100_000),
+      "d".repeat(MAX + 500), // single chunk larger than MAX_BUFFER
+      "e".repeat(42),
+      "f",
+      "g".repeat(10_000),
+    ];
+
+    for (const data of chunks) {
+      emitData(inst, data);
+      oracle = (oracle + data).slice(-MAX);
+    }
+    // Simulate many small chunks (hot path during verbose output).
+    for (let i = 0; i < 500; i++) {
+      const data = String(i % 10);
+      emitData(inst, data);
+      oracle = (oracle + data).slice(-MAX);
+    }
+
+    const replay = hub.ensure(BOARD, "n1", 0, 0, false);
+    expect(replay.length).toBeLessThanOrEqual(MAX);
+    expect(replay).toBe(oracle);
+  });
+
   it("kills sessions and resolves waitForExit when the active PTY exits", async () => {
     const broadcasts: Array<Record<string, unknown>> = [];
     hub.setBroadcast((msg) => broadcasts.push(msg));

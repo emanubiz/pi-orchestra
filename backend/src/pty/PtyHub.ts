@@ -32,7 +32,8 @@ interface BoardGraph {
 
 interface Session {
   runtime: INodeRuntime;
-  buffer: string;
+  chunks: string[];
+  bufferLen: number;
   startedAt: number;
 }
 
@@ -304,7 +305,7 @@ export class PtyHub {
           this.resize(boardId, nodeId, cols, rows);
         }
       }
-      return existing.buffer;
+      return existing.chunks.join("");
     }
     if (!spawnIfMissing) return "";
     const graph = this.graphs.get(boardId);
@@ -348,7 +349,7 @@ export class PtyHub {
     this.ready.delete(k);
     this.waitingInjects.delete(k);
 
-    const session: Session = { runtime, buffer: "", startedAt: Date.now() };
+    const session: Session = { runtime, chunks: [], bufferLen: 0, startedAt: Date.now() };
     this.sessions.set(k, session);
 
     runtime.spawn({
@@ -363,7 +364,19 @@ export class PtyHub {
       orchestraUrl: BASE_URL,
       runtimeConfig: node?.runtimeConfig,
       onOutput: (data) => {
-        session.buffer = (session.buffer + data).slice(-MAX_BUFFER);
+        session.chunks.push(data);
+        session.bufferLen += data.length;
+        while (session.bufferLen > MAX_BUFFER) {
+          const excess = session.bufferLen - MAX_BUFFER;
+          const head = session.chunks[0];
+          if (head.length <= excess) {
+            session.chunks.shift();
+            session.bufferLen -= head.length;
+          } else {
+            session.chunks[0] = head.slice(excess);
+            session.bufferLen -= excess;
+          }
+        }
         this.broadcast({ type: "pty_output", boardId, nodeId, data });
       },
       onExit: (exitCode) => {
