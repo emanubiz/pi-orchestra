@@ -1,141 +1,117 @@
-# Review: Analisi tecnica — ottimizzazione e integrazione multi-harness
+# Review: Analisi tecnica v2 — ottimizzazione e integrazione multi-harness
 
 **Reviewer:** Hermes Agent (GLM-5.2)
 **Data:** 2026-07-01
-**Repo state:** `main` @ `4e0a4fd`
-**Documento reviewato:** Analisi tecnica non-committata (ottimizzazione CPU/memoria, pattern multi-harness, valutazione T3 Code)
+**Repo state:** `main` @ `4e0a4fd` · `feat/hermes-tui-runtime` pushato su origin
+**Documento reviewato:** Analisi tecnica v2 (ottimizzazione CPU/memoria, pattern multi-harness, valutazione T3 Code)
 
 ---
 
 ## Metodologia
 
-Ogni claim tecnica è stata verificata contro il codice sorgente a `main` (HEAD `4e0a4fd`). Le dimensioni dei file, le righe citate, le strutture dati e i pattern architetturali sono stati confrontati direttamente. Le osservazioni che followsi basano su codice reale, non sul documento in se stesso.
+Ogni claim tecnica è stata verificata contro il codice sorgente. Le claim della v1 erano già state tutte confermate. La v2 introduce una claim nuova non verificata nella prima review: il plugin Hermes registra tool nativi via `ctx.register_tool()` invece di parsare `@@HANDOFF` dal testo. Questa claim è stata verificata leggendo `backend/hermes-plugins/orchestra/__init__.py` sul branch `feat/hermes-tui-runtime`.
 
 ---
 
-## 1. Verifica delle claim tecniche
+## 1. Verifica claim tecniche v2
 
-| Claim del documento | Esito | Note |
+| Claim v2 | Esito | Evidenza |
 |---|---|---|
-| `PtyHub.ts` = 760 righe | ✅ | Confermato |
-| Backend ~4.300 righe TS | ✅ | 4.324 totale (find + wc -l) |
-| HEAD = `4e0a4fd` | ✅ | `main` è a questo commit |
-| `MAX_BUFFER = 256_000` a riga 11 | ✅ | Letterale verificato |
-| `session.buffer + data).slice(-MAX_BUFFER` a riga 448 | ✅ | Esatto: `term.onData` → concat + slice per ogni chunk |
-| `clients = new Set<WebSocket>()` globale, non partizionato per board | ✅ | `ws/handler.ts:6`, nessun filtro per board nel loop di broadcast |
-| `docs/HERMES_DESKTOP.md` Option C — HermesRuntime | ✅ | Riga 90-99, descrive sostituzione di pi spawn con Hermes TUI gateway |
-| T3 Code = app Electron, non libreria embeddabile | ✅ | Ragionamento architetturale corretto |
+| PtyHub.ts = 760 righe | ✅ | `wc -l` confermato su main |
+| Backend ~4.300 righe TS | ✅ | 4.324 totale |
+| `MAX_BUFFER = 256_000` | ✅ | PtyHub.ts:11 |
+| `session.buffer` letto in un solo punto (`ensure()`) | ✅ | PtyHub.ts:368 — unico read site nel codebase |
+| Buffer non usato da watchdog/handoff | ✅ | Handoff parsing è in `call-agent.ts` evento `agent_end` su `messages`, non su `session.buffer` |
+| `JSON.stringify` O(1) per messaggio, non O(M) | ✅ | handler.ts:9 — una chiamata prima del loop |
+| Pattern multi-runtime già implementato su `feat/hermes-tui-runtime` | ✅ | 31 file, +2396/-860. `INodeRuntime.ts`, `PtyRuntime.ts`, `PiRuntime.ts`, `HermesRuntime.ts`, `findInPath.ts` |
+| Plugin Hermes registra `orchestra_handoff` come tool nativo via `ctx.register_tool()` | ✅ | `__init__.py`: `ctx.register_tool("orchestra_handoff", "orchestra", {schema}, orchestra_handoff, ...)` — function-calling vero, nessun parsing `@@HANDOFF` |
+| Plugin registra anche `orchestra_card` come tool nativo | ✅ | Stesso pattern: `ctx.register_tool("orchestra_card", ...)` |
+| Hook lifecycle: `on_session_start` → `/internal/ready`, `pre_llm_call` → `/internal/orchestra-context`, `post_llm_call` → `/internal/turn-ended` | ✅ | Tutti e tre gli hook presenti e confermati |
+| `post_llm_call` usa flag `_handoff_called_this_turn` per sapere se handoff avvenuto | ✅ | Set a `True` dentro `orchestra_handoff()`, letto in `post_llm_call` per `/internal/turn-ended` |
+| T3 Code = app Electron sibling, non embeddabile | ✅ | Ragionamento architetturale corretto |
 
 ---
 
-## 2. §2.1 — Buffer a chunk: problema reale, surface più piccola del previsto
+## 2. Correzioni v1 → v2: tutte integrate correttamente
 
-Il documento propone di sostituire `session.buffer` stringa singola con una struttura a chunk, Ricostruzione della stringa completa solo on-demand (replay scrollback in `attach_node`).
+### 2.1 §2.2 — serializzazione
 
-**Verifica:** `session.buffer` è letto in **un solo punto** dell'intero codebase — `PtyHub.ts:368`:
+**v1 (errato):** "il costo di serializzazione+invio cresce con M"
+**v2 (corretto):** `JSON.stringify` è O(1) per messaggio, solo `ws.send` scala con M. Beneficio reale è bandwidth, non CPU.
 
-```ts
-return existing.buffer;  // dentro ensure(), per il replay al client che si connette
+✅ Integrazione corretta. La precisazione che il ROI è basso per single developer locale è mantenuta e corretta.
+
+### 2.2 §3 — pattern già implementato
+
+**v1 (errato):** presentava HermesRuntime come pattern futuro da seguire
+**v2 (corretto):** ~e codice esistente su `feat/hermes-tui-runtime`, 31 file. L'astrazione (`INodeRuntime`, `PtyRuntime`) esiste già. Generalizzare = aggiungere classi `extends PtyRuntime`.
+
+✅ Integrazione corretta. Alberatura dei file e responsabilità delle classi verificata contro il branch.
+
+### 2.3 §3 — handoff Hermes via tool nativo
+
+**Claim nuova v2:** il plugin Hermes **non parsa** `@@HANDOFF`. Registra `orchestra_handoff(recipient, message)` come tool nativo via `ctx.register_tool()`. Il modello lo chiama con function-calling.
+
+✅ **Verificato contro `__init__.py`:**
+
+```python
+ctx.register_tool(
+    "orchestra_handoff",
+    "orchestra",
+    {
+        "type": "object",
+        "properties": {
+            "recipient": {"type": "string", ...},
+            "message": {"type": "string", ...},
+        },
+        "required": ["recipient", "message"],
+    },
+    orchestra_handoff,
+    description="Hand off work to another agent in the pipeline",
+    emoji="🤝",
+)
 ```
 
-Il buffer **non** è usato da:
-- Watchdog deterministico (gira nell'estensione `call-agent.ts`, evento `agent_end`)
-- Rilevamento `@@HANDOFF` (parsing regex su `messages` dell'agent, non sul PTY output)
-- alcun hot path di bootstrap, iniezione, o handoff
+Il tool `orchestra_handoff` chiama `POST /internal/call-agent` con `{boardId, fromNodeId, targetNodeId: recipient, message}`. Stesso endpoint usato da pi via `call-agent.ts`, ma senza parsing regex — il modello chiama direttamente la funzione.
 
-**Implicazione:** il refactor ha una superficie minima. Cambiare la struttura dati interna (`string` → `string[]` ring buffer o `Buffer` circolare) richiede di modificare solo:
-1. La scrittura in `onData` (riga 448)
-2. La lettura in `ensure()` (riga 368) — ricostruire la stringa con `.join("")` solo qui
+`orchestra_card(column)` segue lo stesso pattern per il Kanban → `POST /internal/card-status`.
 
-Tutto il resto del codebase è agnostico alla struttura interna del buffer. Il riesgo di regressione è basso e localizzato.
+Il flag `_handoff_called_this_turn` è settato a `True` dentro `orchestra_handoff()` e letto in `post_llm_call` per segnalare `/internal/turn-ended` — il watchdog sa se l'handoff è avvenuto senza parsare testo.
 
-**Concordo con la priorità indicata (Alta).** Il profiling reale suggerito in §6 rimane necessario per quantificare, ma il refactor è sicuro indipendentemente dallentità del beneficio — la struttura attuale è oggettivamente O(n) per chunk con n fino a 256.000 char.
+**Questa è la distinzione architetturale più importante del documento:** pi usa parsing regex su output PTY (`@@HANDOFF:<handle> ... @@END`), Hermes usa tool nativo con function-calling. Per harness senza un sistema di plugin equivalente, resta necessario il parser ad-hoc.
 
----
+### 2.4 §2.1 — superficie minima del refactor
 
-## 3. §2.2 — Broadcast non filtrato: problema reale, premessa sbagliata
+**v2 aggiunge:** `session.buffer` è letto in un solo punto (`ensure()`), non è in alcun hot path.
 
-Il documento afferma: "il costo di serializzazione+invio cresce con M anche per dati irrilevanti a M-1 client."
-
-**Verifica del codice (`ws/handler.ts:8-12`):**
-
-```ts
-function broadcast(msg: Record<string, unknown>): void {
-  const payload = JSON.stringify(msg);   // ← UNA volta per messaggio
-  for (const client of clients) {
-    if (client.readyState === 1) client.send(payload);  // ← stesso string, O(M) send
-  }
-}
-```
-
-`JSON.stringify` è O(1) per messaggio, **non** O(M). Il costo che scala con M è solo `ws.send` — che su localhost è una memory copy nel frame buffer WebSocket. Il beneficio reale del filtering per board non è CPU, è **bandwidth**: evitare di inviare payload irrilevanti al frontend.
-
-**Per il use case reale** (single developer locale, 1-2 client tipicamente), il ROI è basso. La domanda aperta in §6 ("vale la pena filtrare per board?") ha risposta: **non ora**, a meno che non emerga un scenario multi-client reale (es. dashboard condivisa, CI watcher).
-
-### Dettaglio tecnico sulla proposta Map
-
-Il documento propone `Map<boardId, Set<WebSocket>>`. Dettaglio non addressato: il frontend può avere **multiple board aperte nello stesso tab** (README: "tab multiple"). Un singolo `ws` può essere iscritto a più board. La struttura corretta richiede che:
-
-- Uno stesso `ws` compaia in più `Set` (uno per board a cui è iscritto)
-- Il cleanup su `ws.close` rimuova il ws da **tutti** i set, non solo uno
-- L'iscrizione avvenga su `load_graph` (messaggio WS esistente in `handler.ts:45-56`)
-
-Non è un blocker, ma va specificato nell'implementazione per evitare leak di ws zombie.
+✅ Confermato. L'unico read site è `PtyHub.ts:368` (`return existing.buffer`). Il refactor richiede di modificare solo scrittura (`onData`) e lettura (`ensure`).
 
 ---
 
-## 4. §3 — Pattern multi-harness: già implementato, non solo proposto
+## 3. Osservazioni aggiuntive
 
-Il documento presenta il pattern HermesRuntime come "generalizzabile a qualunque harness CLI-based" e lo descrive come lavoro futuro da fare.
+### 3.1 Implicazione per la generalizzazione multi-harness
 
-**Verifica:** il branch `feat/hermes-tui-runtime` (già pushato su `origin`) **lo implementa già concretamente**:
+La v2 identifica correttamente il vero bottleneck: non l'astrazione runtime (già esistente), ma l'handoff parser per-harness. La classe di soluzioni è:
 
-```
-HermesRuntime.ts       → extends PtyRuntime, spawn `hermes --tui`
-PtyRuntime.ts          → astrazione base per qualunque runtime PTY
-INodeRuntime.ts        → interfaccia RuntimeSpawnConfig
-findInPath.ts          → utility per risolvere binari su PATH
-runtimeStore.ts (FE)   → supporto UI per tipi di nodo multipli
-```
+| Harness | Sistema plugin/tool nativo? | Approccio handoff possibile |
+|---|---|---|
+| pi | Sì (extension API, `call-agent.ts`) | Parsing `@@HANDOFF` su `agent_end` (attuale) |
+| Hermes | Sì (plugin Python, `ctx.register_tool`) | Tool nativo `orchestra_handoff` (attuale) |
+| Claude Code | Sì (hooks + `--output-format json`) | Hook con parsing JSON strutturato |
+| Codex CLI | Sì (`--json`) | Parsing JSON strutturato su output |
+| OpenCode | Sì (endpoint `/zen/v1` JSON-RPC) | Adapter con JSON-RPC, niente PTY |
 
-Diff: 31 file, 2.396 inserimenti, 860 cancellazioni. Non è un pattern ipotetico — è codice esistente che necessita di review/merge (o scarto).
+OpenCode è il caso più interessante: ha un endpoint JSON-RPC strutturato, quindi non serve nemmeno il PTY — potrebbe bypassare `PtyRuntime` entirely con un runtime ad-hoc che implementa `INodeRuntime` su JSON-RPC invece che su PTY.
 
-**Correzione proposta per il documento:** §3 dovrebbe dire "il pattern è già implementato su `feat/hermes-tui-runtime` come HermesRuntime — la generalizzazione a claude-code/codex/opencode richiede di implementare runtime aggiuntivi che extends PtyRuntime con parse-specific handoff logic, non di creare l'astrazione da zero."
+### 3.2 Priorità §5 — confermata
 
----
-
-## 5. §4 — T3 Code: valutazione corretta
-
-Nessuna critica. L'analisi è accurata:
-- T3 Code è un'app Electron sibling, non embeddabile come nodo
-- Le CLI supportate (claude, codex, opencode, cursor-agent) sono binari CLI come pi
-- Il pattern branch-per-thread + PR è ortogonale e riuscabile come feature propria
-- Il vero collo di bottiglia per multi-harness è l'handoff parser per-harness, non l'astrazione runtime
+La tabella priorità è corretta nell'ordinamento. §2.1 (buffer) prima di §3 (handoff parser) è giusto: il refactor del buffer è sicuro e localizzato, mentre il parser multi-harness è lavoro alto-effort che dipende dalla morphologia di ciascun CLI.
 
 ---
 
-## 6. §6 — Risposte alle domande aperte
+## 4. Verdetto finale
 
-### Q1: "Qualcuno ha dati di carico reali?"
+La v2 integra correttamente tutte e tre le correzioni richieste dalla review v1. La claim nuova (tool nativo Hermes via `ctx.register_tool`) è verificata e accurata. Il documento è pronto per essere trasformato in issue/PR.
 
-**Risposta parziale dal codice:** il buffer PTY **non** è nell'hot path del handoff. Il parsing `@@HANDOFF` avviene nell'estensione `call-agent.ts` evento `agent_end`, che opera su `messages` (l'array di messaggi dell'agent loop), non sul `session.buffer` PTY. Quindi anche se il buffer fosse un collo di bottiglia di allocazione, non impatta la latenza del handoff. Il profiling resta necessario per quantificare il beneficio GC, ma il refactor è sicuro indipendentemente.
-
-### Q2: "Vale la pena filtrare per board?"
-
-**No, per ora.** Il costo che scales con M è solo `ws.send` su localhost (memory copy marginale), non `JSON.stringify` (O(1) per messaggio). Per single developer locale con 1-2 client, il ROI è basso. Investire solo se emerge un scenario multi-client reale.
-
-### Q3: "Esiste uno standard per structured output nei CLI esterni?"
-
-**Parziale.** Claude Code supporta `--output-format json` (modalità non-interactive). Codex CLI ha `--json`. OpenCode ha endpoint `/zen/v1` con JSON-RPC strutturato. Tutti possono emettere structured output, ma nessuno emette `@@HANDOFF` nativamente — il parser ad-hoc resta necessario per ciascuno. L'alternativa è un protocollo custom via plugin (come fa pi con `call-agent.ts`): se l'harness supporta un hook `agent_end` equivalente, si può parsare lì il block handoff invece che fare screen-scraping del PTY.
-
----
-
-## 7. Verdetto finale
-
-Il documento è tecnicamente accurato nelle claim fattuali (tutte verificate) e ben argomentato nella sezione T3 Code. Tre correzioni necessarie prima di trasformarlo in issue/PR:
-
-1. **§3:** aggiornare — il pattern non è "da seguire", è già implementato su `feat/hermes-tui-runtime`
-2. **§2.2:** correggere "serializzazione cresce con M" → è solo `ws.send`, non `JSON.stringify`
-3. **§2.1:** aggiungere che la safe-surface del refactor è minima (buffer letto solo in `ensure()`)
-
-Le priorità della tabella §5 sono corrette nell'ordinamento. §2.1 prima di §2.2 è giusto anche con i caveat sopra.
+**Zero correzioni richieste sulla v2.**
