@@ -72,6 +72,7 @@ POST /api/v1/orchestra/boards/:boardId/stop
 GET  /api/v1/orchestra/boards/:boardId/status
 
 POST /api/v1/orchestra/boards/:boardId/nodes/:nodeId/stop
+POST /api/v1/orchestra/boards/:boardId/nodes/:nodeId/restart
 POST /api/v1/orchestra/boards/:boardId/nodes/:nodeId/inject   { message: string }
 POST /api/v1/orchestra/boards/:boardId/nodes/:nodeId/input    { data: string }
 
@@ -189,6 +190,10 @@ POST /api/v1/orchestra/boards/:boardId/stop
 POST /api/v1/orchestra/boards/:boardId/nodes/:nodeId/stop
 → { ok: true }
 # Equivalent WS: abort_node
+
+POST /api/v1/orchestra/boards/:boardId/nodes/:nodeId/restart
+→ { ok: true }     # kill + respawn the node's session
+# Equivalent WS: restart_node
 ```
 
 ### Status
@@ -199,7 +204,7 @@ GET /api/v1/orchestra/boards/:boardId/status
   boardId,
   cwd,
   label,
-  nodes: [{ nodeId, label, status, startedAt? }],
+  nodes: [{ nodeId, label, status, runtime, startedAt? }],   # runtime: "pi" | "hermes"
   edges: [{ sourceNodeId, targetNodeId }]
 }
 ```
@@ -231,7 +236,10 @@ Body: {
 > board is automatically deleted to avoid leaking resources. The `boardId` in the
 > response is provided for reference but subsequent requests to it will return 404.
 > If the flow times out (`timedOut: true`) the board is kept so you can inspect
-> or interact with it via the CLI or UI.
+> or interact with it via the CLI or UI. If the run itself fails (e.g. the graph
+> has no `entryNodeId` and none is provided), the request returns `400` and the
+> temporary board is deleted — a bad `/flows` call never leaks a board.
+> `waitTimeoutMs` is clamped to `[1_000, 3_600_000]` (default `120_000`).
 
 Example:
 
@@ -304,7 +312,7 @@ Env vars: `PINODES_ORCHESTRA_URL` (default `http://localhost:3847`), `PINODES_OR
 - `board create <cwd> [label]` | `board list` | `board delete <id>` | `board status <id>` | `board graph <id> [file.json]`
 - `node add <boardId> <label> <promptId> [--x X] [--y Y] [--override O] [--canBeFinal bool]`
 - `node update <boardId> <nodeId> [--label L] [--promptId P] [--override O] [--canBeFinal bool] [--x X] [--y Y]`
-- `node delete <boardId> <nodeId>`
+- `node delete <boardId> <nodeId>` | `node stop <boardId> <nodeId>` | `node restart <boardId> <nodeId>`
 - `edge add <boardId> <srcId> <tgtId>` | `edge delete <boardId> <edgeId>`
 - `run <boardId> <message> [--nodeId NID]`
 - `inject <boardId> <nodeId> <message>`
@@ -374,6 +382,11 @@ disables it; `true` forces it on.
 In the **web UI**, runtime is set when creating a node (`POST` equivalent via the add-agent
 flow) and is not editable afterward. The REST API still accepts `runtime` on `PATCH` for
 programmatic updates (restarting the PTY is the caller's responsibility).
+
+**Validation (400):** `runtime` must be one of `pi` | `hermes` (unknown values
+are rejected, not silently persisted); `runtimeConfig` must be a plain object;
+on `PATCH`, `label`/`promptId` must be non-empty strings, `position` must be
+`{ x: number, y: number }`, and `canBeFinal` a boolean.
 
 `runtimeConfig` fields recognized by the runtimes (unrecognized fields are
 silently ignored, so the shape can grow without a migration):

@@ -171,6 +171,13 @@ export class BoardManager {
     return { ok: true };
   }
 
+  /** Kill and respawn a node's session (REST parity with the WS `restart_node`). */
+  restartNode(boardId: string, nodeId: string): { ok: boolean } {
+    this.getNode(boardId, nodeId);
+    this.ptyHub.restart(boardId, nodeId, 80, 24);
+    return { ok: true };
+  }
+
   injectNode(boardId: string, nodeId: string, message: string): { ok: boolean } {
     this.getNode(boardId, nodeId);
     this.ptyHub.ensure(boardId, nodeId, 80, 24);

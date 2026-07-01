@@ -3,6 +3,57 @@ import { BoardManager } from "../orchestra/BoardManager.js";
 import { ptyHub } from "../pty/PtyHub.js";
 import type { NodeRuntime, WorkflowEdge, WorkflowGraph, WorkflowNode } from "../types.js";
 
+const VALID_RUNTIMES: ReadonlySet<string> = new Set(["pi", "hermes"]);
+
+/** Clamp `waitTimeoutMs` to something sane: a non-number/NaN falls back to the
+ *  default, and the value is bounded so a typo can neither make the wait
+ *  fire instantly (0/negative) nor pin the HTTP request open for days. */
+const WAIT_TIMEOUT_DEFAULT_MS = 120_000;
+const WAIT_TIMEOUT_MIN_MS = 1_000;
+const WAIT_TIMEOUT_MAX_MS = 3_600_000; // 1h
+function clampWaitTimeout(value: unknown): number {
+  const n = typeof value === "number" && Number.isFinite(value) ? value : WAIT_TIMEOUT_DEFAULT_MS;
+  return Math.min(WAIT_TIMEOUT_MAX_MS, Math.max(WAIT_TIMEOUT_MIN_MS, n));
+}
+
+/** Runtime-level validation for the node fields whose TypeScript types don't
+ *  survive the wire. Returns an error string (→ 400) or null when valid.
+ *  `partial` relaxes required-field checks for PATCH bodies. */
+function validateNodeFields(
+  body: Record<string, unknown>,
+  partial: boolean,
+): string | null {
+  const { label, promptId, promptOverride, canBeFinal, runtime, runtimeConfig, position } = body;
+  if (label !== undefined || !partial) {
+    if (!label || typeof label !== "string") return "label is required";
+  }
+  if (promptId !== undefined || !partial) {
+    if (!promptId || typeof promptId !== "string") return "promptId is required";
+  }
+  if (position !== undefined || !partial) {
+    const p = position as { x?: unknown; y?: unknown } | undefined;
+    if (!p || typeof p.x !== "number" || typeof p.y !== "number") {
+      return "position { x, y } is required";
+    }
+  }
+  if (promptOverride !== undefined && promptOverride !== null && typeof promptOverride !== "string") {
+    return "promptOverride must be a string or null";
+  }
+  if (canBeFinal !== undefined && canBeFinal !== null && typeof canBeFinal !== "boolean") {
+    return "canBeFinal must be a boolean";
+  }
+  if (runtime !== undefined && !VALID_RUNTIMES.has(runtime as string)) {
+    return `runtime must be one of: ${[...VALID_RUNTIMES].join(", ")}`;
+  }
+  if (
+    runtimeConfig !== undefined &&
+    (typeof runtimeConfig !== "object" || runtimeConfig === null || Array.isArray(runtimeConfig))
+  ) {
+    return "runtimeConfig must be an object";
+  }
+  return null;
+}
+
 export function createOrchestraRoutes(boardManager: BoardManager) {
   return async function orchestraRoutes(app: FastifyInstance): Promise<void> {
     app.post<{ Body: { cwd: string; label?: string } }>(
@@ -123,6 +174,19 @@ export function createOrchestraRoutes(boardManager: BoardManager) {
 
     app.post<{
       Params: { boardId: string; nodeId: string };
+    }>("/boards/:boardId/nodes/:nodeId/restart", async (req, reply) => {
+      try {
+        boardManager.restartNode(req.params.boardId, req.params.nodeId);
+        return { ok: true };
+      } catch (err) {
+        return reply
+          .code(400)
+          .send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+
+    app.post<{
+      Params: { boardId: string; nodeId: string };
       Body: { message: string };
     }>("/boards/:boardId/nodes/:nodeId/inject", async (req, reply) => {
       const message = req.body.message;
@@ -174,15 +238,8 @@ export function createOrchestraRoutes(boardManager: BoardManager) {
     }>("/boards/:boardId/nodes", async (req, reply) => {
       const { id, label, promptId, promptOverride, canBeFinal, runtime, runtimeConfig, position } =
         req.body;
-      if (!label || typeof label !== "string") {
-        return reply.code(400).send({ error: "label is required" });
-      }
-      if (!promptId || typeof promptId !== "string") {
-        return reply.code(400).send({ error: "promptId is required" });
-      }
-      if (!position || typeof position.x !== "number" || typeof position.y !== "number") {
-        return reply.code(400).send({ error: "position { x, y } is required" });
-      }
+      const invalid = validateNodeFields(req.body as Record<string, unknown>, false);
+      if (invalid) return reply.code(400).send({ error: invalid });
       try {
         const node = boardManager.addNode(req.params.boardId, {
           id,
@@ -214,6 +271,8 @@ export function createOrchestraRoutes(boardManager: BoardManager) {
         position: { x: number; y: number };
       }>;
     }>("/boards/:boardId/nodes/:nodeId", async (req, reply) => {
+      const invalid = validateNodeFields(req.body as Record<string, unknown>, true);
+      if (invalid) return reply.code(400).send({ error: invalid });
       try {
         const node = boardManager.updateNode(
           req.params.boardId,
@@ -330,17 +389,28 @@ export function createOrchestraRoutes(boardManager: BoardManager) {
           .send({ error: err instanceof Error ? err.message : String(err) });
       }
 
-      const { nodeId } = boardManager.run(
-        board.boardId,
-        loadedGraph.entryNodeId ?? undefined,
-        message,
-      );
+      // A run failure (e.g. no entryNodeId and none provided) must clean up the
+      // board this request created — otherwise every bad /flows call leaks a
+      // persisted temporary board.
+      let nodeId: string;
+      try {
+        ({ nodeId } = boardManager.run(
+          board.boardId,
+          loadedGraph.entryNodeId ?? undefined,
+          message,
+        ));
+      } catch (err) {
+        boardManager.delete(board.boardId);
+        return reply
+          .code(400)
+          .send({ error: err instanceof Error ? err.message : String(err) });
+      }
 
       if (req.body.wait) {
         const result = await boardManager.waitForExit(
           board.boardId,
           nodeId,
-          req.body.waitTimeoutMs ?? 120_000,
+          clampWaitTimeout(req.body.waitTimeoutMs),
         );
 
         // Flow completed → auto-cleanup the temporary board.

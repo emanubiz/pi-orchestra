@@ -869,10 +869,16 @@ export class PtyHub {
     return this.sessions.has(key(boardId, nodeId));
   }
 
-  /** Return status and start time for every node on a board. */
+  /** Return status, runtime and start time for every node on a board. */
   getNodeStatuses(
     boardId: string,
-  ): Array<{ nodeId: string; label: string; status: NodeStatus; startedAt?: number }> {
+  ): Array<{
+    nodeId: string;
+    label: string;
+    status: NodeStatus;
+    runtime: NodeRuntime;
+    startedAt?: number;
+  }> {
     const graph = this.graphs.get(boardId);
     if (!graph) return [];
     return [...graph.nodes.values()].map((n) => {
@@ -881,6 +887,7 @@ export class PtyHub {
         nodeId: n.id,
         label: n.label,
         status: s ? "running" : "idle",
+        runtime: n.runtime ?? "pi",
         startedAt: s?.startedAt,
       };
     });

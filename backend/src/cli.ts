@@ -203,6 +203,24 @@ async function cmdNodeDelete(args: string[]): Promise<void> {
   console.log(JSON.stringify(result, null, 2));
 }
 
+async function cmdNodeStop(args: string[]): Promise<void> {
+  const [boardId, nodeId] = args;
+  if (!boardId || !nodeId) usage("node stop <boardId> <nodeId>");
+  const result = await api(`/boards/${boardId}/nodes/${nodeId}/stop`, {
+    method: "POST",
+  });
+  console.log(JSON.stringify(result, null, 2));
+}
+
+async function cmdNodeRestart(args: string[]): Promise<void> {
+  const [boardId, nodeId] = args;
+  if (!boardId || !nodeId) usage("node restart <boardId> <nodeId>");
+  const result = await api(`/boards/${boardId}/nodes/${nodeId}/restart`, {
+    method: "POST",
+  });
+  console.log(JSON.stringify(result, null, 2));
+}
+
 // edge subcommands
 async function cmdEdgeAdd(args: string[]): Promise<void> {
   const [boardId, sourceNodeId, targetNodeId] = args;
@@ -316,6 +334,8 @@ Commands:
               [--canBeFinal true|false]
               [--x X] [--y Y]
     node delete <boardId> <nodeId>           Remove a node (kills PTY if running)
+    node stop <boardId> <nodeId>             Stop a node's session
+    node restart <boardId> <nodeId>          Kill and respawn a node's session
 
   Edges (granular CRUD)
     edge add <boardId> <src> <tgt>           Connect two nodes
@@ -400,6 +420,10 @@ async function main(): Promise<void> {
           case "delete":
           case "rm":
             return await cmdNodeDelete(subArgs);
+          case "stop":
+            return await cmdNodeStop(subArgs);
+          case "restart":
+            return await cmdNodeRestart(subArgs);
           default:
             usage(`Unknown node subcommand: ${sub}`);
         }

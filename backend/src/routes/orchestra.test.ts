@@ -56,6 +56,7 @@ function makeFakePtyHub(): PtyHub & {
   const input = vi.fn();
   const kill = vi.fn();
   const killBoard = vi.fn();
+  const restart = vi.fn();
   const setGraph = vi.fn((_boardId: string, g: WorkflowGraph) => {
     graph = g;
   });
@@ -73,6 +74,7 @@ function makeFakePtyHub(): PtyHub & {
     input,
     kill,
     killBoard,
+    restart,
     isNodeRunning: (boardId: string, nodeId: string) =>
       running.has(`${boardId}:${nodeId}`),
     getNodeStatuses: (boardId: string) => {
@@ -83,6 +85,7 @@ function makeFakePtyHub(): PtyHub & {
           nodeId: n.id,
           label: n.label,
           status: isRunning ? ("running" as const) : ("idle" as const),
+          runtime: n.runtime ?? ("pi" as const),
           startedAt: isRunning ? 1 : undefined,
         };
       });
@@ -632,6 +635,137 @@ describe("orchestra routes", () => {
       payload: { name: "x" },
     });
     expect(res.statusCode).toBe(400);
+  });
+
+  it("cleans up the flow board when run fails (no entry node)", async () => {
+    const { app } = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/orchestra/flows",
+      payload: {
+        name: "no-entry",
+        cwd: "/tmp",
+        // Graph is valid but has no entryNodeId, and none is provided → run throws.
+        graph: { ...sampleGraph, entryNodeId: null },
+        message: "go",
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).error).toContain("entryNodeId");
+
+    // The temporary board created for the flow must NOT leak.
+    const list = await app.inject({ method: "GET", url: "/api/v1/orchestra/boards" });
+    expect(JSON.parse(list.body).boards).toHaveLength(0);
+  });
+
+  it("rejects an unknown runtime and a non-object runtimeConfig on create/patch", async () => {
+    const { app } = await buildApp();
+    const boardId = JSON.parse(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/api/v1/orchestra/boards",
+          payload: { cwd: "/tmp" },
+        })
+      ).body,
+    ).boardId;
+    await app.inject({
+      method: "PUT",
+      url: `/api/v1/orchestra/boards/${boardId}/graph`,
+      payload: sampleGraph,
+    });
+
+    const badRuntime = await app.inject({
+      method: "POST",
+      url: `/api/v1/orchestra/boards/${boardId}/nodes`,
+      payload: {
+        label: "X",
+        promptId: "p1",
+        position: { x: 0, y: 0 },
+        runtime: "banana",
+      },
+    });
+    expect(badRuntime.statusCode).toBe(400);
+    expect(JSON.parse(badRuntime.body).error).toContain("runtime");
+
+    const badConfig = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/orchestra/boards/${boardId}/nodes/arch`,
+      payload: { runtimeConfig: ["not", "an", "object"] },
+    });
+    expect(badConfig.statusCode).toBe(400);
+    expect(JSON.parse(badConfig.body).error).toContain("runtimeConfig");
+
+    const badPosition = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/orchestra/boards/${boardId}/nodes/arch`,
+      payload: { position: { x: "left" } },
+    });
+    expect(badPosition.statusCode).toBe(400);
+  });
+
+  it("restarts a node via REST and 400s an unknown node", async () => {
+    const { app, ptyHub } = await buildApp();
+    const boardId = JSON.parse(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/api/v1/orchestra/boards",
+          payload: { cwd: "/tmp" },
+        })
+      ).body,
+    ).boardId;
+    await app.inject({
+      method: "PUT",
+      url: `/api/v1/orchestra/boards/${boardId}/graph`,
+      payload: sampleGraph,
+    });
+
+    const ok = await app.inject({
+      method: "POST",
+      url: `/api/v1/orchestra/boards/${boardId}/nodes/arch/restart`,
+    });
+    expect(ok.statusCode).toBe(200);
+    expect(JSON.parse(ok.body)).toEqual({ ok: true });
+    expect(ptyHub.restart).toHaveBeenCalledWith(boardId, "arch", 80, 24);
+
+    const missing = await app.inject({
+      method: "POST",
+      url: `/api/v1/orchestra/boards/${boardId}/nodes/ghost/restart`,
+    });
+    expect(missing.statusCode).toBe(400);
+  });
+
+  it("status includes each node's runtime", async () => {
+    const { app } = await buildApp();
+    const boardId = JSON.parse(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/api/v1/orchestra/boards",
+          payload: { cwd: "/tmp" },
+        })
+      ).body,
+    ).boardId;
+    await app.inject({
+      method: "PUT",
+      url: `/api/v1/orchestra/boards/${boardId}/graph`,
+      payload: {
+        ...sampleGraph,
+        nodes: [
+          sampleGraph.nodes[0],
+          { ...sampleGraph.nodes[1], runtime: "hermes" },
+        ],
+      },
+    });
+
+    const status = await app.inject({
+      method: "GET",
+      url: `/api/v1/orchestra/boards/${boardId}/status`,
+    });
+    const nodes = JSON.parse(status.body).nodes as Array<{ nodeId: string; runtime: string }>;
+    expect(nodes.find((n) => n.nodeId === "arch")?.runtime).toBe("pi");
+    expect(nodes.find((n) => n.nodeId === "dev")?.runtime).toBe("hermes");
   });
 
   it("rejects requests without token when auth is enabled", async () => {
