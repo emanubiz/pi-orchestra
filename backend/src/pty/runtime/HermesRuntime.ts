@@ -2,6 +2,7 @@ import pty from "node-pty";
 import { findInPath } from "./findInPath.js";
 import type { RuntimeSpawnConfig } from "./INodeRuntime.js";
 import { PtyRuntime } from "./PtyRuntime.js";
+import { resolveToolset } from "./resolveToolset.js";
 
 /** Resolve the `hermes` binary on PATH. */
 function resolveHermesCommand(): string {
@@ -29,7 +30,7 @@ export class HermesRuntime extends PtyRuntime {
     const args = [
       "--tui",
       "--toolsets",
-      "read,bash,edit,write,grep",
+      resolveToolset(config.runtimeConfig),
       "--session-id",
       `${config.boardId}-${config.nodeId}`.replace(/[^a-zA-Z0-9-]/g, ""),
       "--name",

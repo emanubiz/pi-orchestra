@@ -134,6 +134,29 @@ describe("PiRuntime", () => {
     expect(spawnCall.args).toContain("--extension");
   });
 
+  it("uses runtimeConfig.toolset to override the default --tools list", () => {
+    const rt = new PiRuntime();
+    rt.spawn(spawnConfig({ runtimeConfig: { toolset: "read,grep" } }));
+
+    const spawnCall = lastSpawn()!;
+    const toolsIdx = spawnCall.args.indexOf("--tools");
+    expect(spawnCall.args[toolsIdx + 1]).toBe("read,grep");
+  });
+
+  it("falls back to the default toolset when runtimeConfig.toolset is blank or the wrong type", () => {
+    const rt = new PiRuntime();
+    rt.spawn(spawnConfig({ runtimeConfig: { toolset: "   " } }));
+    let spawnCall = lastSpawn()!;
+    let toolsIdx = spawnCall.args.indexOf("--tools");
+    expect(spawnCall.args[toolsIdx + 1]).toBe("read,bash,edit,write,grep");
+
+    const rt2 = new PiRuntime();
+    rt2.spawn(spawnConfig({ runtimeConfig: { toolset: 42 } }));
+    spawnCall = lastSpawn()!;
+    toolsIdx = spawnCall.args.indexOf("--tools");
+    expect(spawnCall.args[toolsIdx + 1]).toBe("read,bash,edit,write,grep");
+  });
+
   it("bakes the appendix into --system-prompt when the extension is absent", () => {
     // Override the fs mock just for this test: report extension missing.
     vi.doMock("node:fs", () => ({

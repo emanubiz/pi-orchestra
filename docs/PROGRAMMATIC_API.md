@@ -364,6 +364,13 @@ ws.onopen = () => {
 Implemented: `runtime?: "pi" | "hermes"` and `runtimeConfig?: Record<string, unknown>`.
 Hermes is gated behind `PINODES_ORCHESTRA_HERMES=true` (off by default).
 
+`runtimeConfig` fields recognized by the runtimes (unrecognized fields are
+silently ignored, so the shape can grow without a migration):
+
+| Field | Type | Effect | Runtimes |
+|---|---|---|---|
+| `toolset` | `string` | Overrides the default tool list (`read,bash,edit,write,grep`) passed as `--tools`/`--toolsets`. Ignored if blank or not a string — falls back to the default. | pi, hermes |
+
 ```typescript
 interface WorkflowNode {
   // ...existing fields
