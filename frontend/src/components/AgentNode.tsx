@@ -3,6 +3,7 @@ import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { Flag, FlagOff, Maximize2, RefreshCw, ScrollText, ShieldCheck, ShieldOff, Trash2 } from "lucide-react";
 import type { WorkflowNodeData, NodeStatus } from "../types";
 import { NodeTerminal } from "./NodeTerminal";
+import { RuntimeBadge } from "./RuntimeBadge";
 import { useTerminalBridge } from "../lib/termTheme";
 import { confirmPiRestart, usePiRestartState } from "../hooks/usePiRestartState";
 import { useRuntimeStore } from "../stores/runtimeStore";
@@ -32,6 +33,7 @@ function AgentNodeComponent({ id, data, selected }: NodeProps & { data: Workflow
   // Determinism watchdog for this node (default on; toggled live for free chat).
   const enforce = useRuntimeStore((s) => s.enforcement[`${boardId}:${id}`] ?? true);
   const setEnforcement = useRuntimeStore((s) => s.setEnforcement);
+  const runtime = data.runtime ?? "pi";
 
   // Selection wins the bar; then live status; an entry node gets a soft amber rest state.
   const bar = selected
@@ -138,6 +140,7 @@ function AgentNodeComponent({ id, data, selected }: NodeProps & { data: Workflow
         >
           <Maximize2 size={12} strokeWidth={2} />
         </button>
+        <RuntimeBadge runtime={runtime} compact />
         <button
           type="button"
           className={`nodrag shrink-0 rounded p-0.5 transition-colors ${
@@ -145,7 +148,7 @@ function AgentNodeComponent({ id, data, selected }: NodeProps & { data: Workflow
               ? "text-amber-400/80 animate-pulse"
               : "text-zinc-500 hover:bg-white/5 hover:text-zinc-200"
           }`}
-          title={restarting ? "Restarting pi…" : "Restart pi (pick up config/extension changes)"}
+          title={restarting ? `Restarting ${runtime}…` : `Restart ${runtime} (pick up config/extension changes)`}
           disabled={restarting}
           onClick={(e) => {
             e.stopPropagation();
@@ -182,7 +185,7 @@ function AgentNodeComponent({ id, data, selected }: NodeProps & { data: Workflow
 
       {/* live mini pi terminal */}
       <div className="h-[150px] bg-black">
-        <NodeTerminal nodeId={id} restarting={restarting} />
+        <NodeTerminal nodeId={id} restarting={restarting} runtime={runtime} />
       </div>
 
       <Handle

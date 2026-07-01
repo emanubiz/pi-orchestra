@@ -24,7 +24,7 @@ const PI_INSTALL_URL = "https://www.npmjs.com/package/@earendil-works/pi-coding-
 /**
  * Owns the pinodes-orchestra backend lifecycle for the extension.
  *
- * Strategy (per docs/EXTENSIONS_ROADMAP.md, Phase 2): never run node-pty /
+ * Strategy (per docs/roadmaps/EXTENSIONS_ROADMAP.md, Phase 2): never run node-pty /
  * better-sqlite3 in-process inside the extension host. Instead spawn the
  * existing Fastify backend (`backend/dist/index.js`) as a Node subprocess and
  * talk to it over localhost HTTP/WS, exactly like the standalone app.

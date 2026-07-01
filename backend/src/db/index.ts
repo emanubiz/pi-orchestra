@@ -81,6 +81,29 @@ function seedPrompts(): void {
     { id: "builtin-design-reviewer", name: "Design Reviewer", file: "design-reviewer.md" },
     { id: "builtin-security-reviewer", name: "Security Reviewer", file: "security-reviewer.md" },
     { id: "builtin-writer", name: "Technical Writer", file: "tech-writer.md" },
+
+    // ── Research & Analysis pipeline (non-coding) ──
+    { id: "builtin-researcher", name: "Researcher", file: "researcher.md" },
+    { id: "builtin-fact-checker", name: "Fact-Checker", file: "fact-checker.md" },
+    { id: "builtin-analyst", name: "Analyst", file: "analyst.md" },
+    { id: "builtin-research-editor", name: "Research Editor", file: "research-editor.md" },
+
+    // ── Content & Writing pipeline (non-coding) ──
+    { id: "builtin-content-strategist", name: "Content Strategist", file: "content-strategist.md" },
+    { id: "builtin-content-writer", name: "Writer", file: "writer.md" },
+    { id: "builtin-copy-editor", name: "Copy Editor", file: "copy-editor.md" },
+    { id: "builtin-proofreader-seo", name: "Proofreader & SEO", file: "proofreader-seo.md" },
+
+    // ── Business & Strategy pipeline (non-coding) ──
+    { id: "builtin-market-analyst", name: "Market Analyst", file: "market-analyst.md" },
+    { id: "builtin-strategist", name: "Business Strategist", file: "strategist.md" },
+    { id: "builtin-financial-modeler", name: "Financial Modeler", file: "financial-modeler.md" },
+    { id: "builtin-strategy-reviewer", name: "Strategy Reviewer", file: "strategy-reviewer.md" },
+
+    // ── Data & Insights pipeline (non-coding) ──
+    { id: "builtin-data-analyst", name: "Data Analyst", file: "data-analyst.md" },
+    { id: "builtin-statistician", name: "Statistician", file: "statistician.md" },
+    { id: "builtin-report-writer", name: "Report Writer", file: "report-writer.md" },
   ];
 
   // UPSERT so builtin refinements + new roles stay in sync with the .md files.

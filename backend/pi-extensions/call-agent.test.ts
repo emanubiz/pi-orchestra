@@ -431,6 +431,66 @@ describe("handoffExtension", () => {
     expect(pi.sendUserMessage).not.toHaveBeenCalled();
   });
 
+  // ── turn-started / turn-ended bridges (closed-loop submit confirmation) ────
+
+  it("posts /internal/turn-started once per before_agent_start", async () => {
+    ctxResponse = ctxNonFinal;
+    const pi = createMockPi();
+    const fetchMock = installFetch();
+    (await loadExtension())(pi as never);
+
+    await pi._emit("before_agent_start", { prompt: "task", systemPrompt: "ROLE" });
+    await pi._emit("before_agent_start", { prompt: "task 2", systemPrompt: "ROLE" });
+
+    const calls = callsTo(fetchMock, "/internal/turn-started");
+    expect(calls).toHaveLength(2);
+    expect(bodyOf(calls[0])).toEqual({ boardId: "board-1", nodeId: "node-a" });
+  });
+
+  it("posts /internal/turn-ended at agent_end with handoffCalledThisTurn", async () => {
+    ctxResponse = ctxNonFinal;
+    const pi = createMockPi();
+    const fetchMock = installFetch();
+    (await loadExtension())(pi as never);
+
+    await runLoop(pi, "@@HANDOFF:developer-1\nImplement.\n@@END");
+
+    const calls = callsTo(fetchMock, "/internal/turn-ended");
+    expect(calls).toHaveLength(1);
+    expect(bodyOf(calls[0])).toEqual({
+      boardId: "board-1",
+      nodeId: "node-a",
+      handoffCalledThisTurn: true,
+    });
+  });
+
+  it("turn-ended reports handoffCalledThisTurn=false when no handoff was emitted", async () => {
+    ctxResponse = ctxNonFinal;
+    const pi = createMockPi();
+    const fetchMock = installFetch();
+    (await loadExtension())(pi as never);
+
+    await runLoop(pi, "I'm finished.");
+
+    const calls = callsTo(fetchMock, "/internal/turn-ended");
+    expect(calls).toHaveLength(1);
+    expect(bodyOf(calls[0]).handoffCalledThisTurn).toBe(false);
+  });
+
+  it("posts turn-ended even when agent_end has no assistant message", async () => {
+    ctxResponse = ctxNonFinal;
+    const pi = createMockPi();
+    const fetchMock = installFetch();
+    (await loadExtension())(pi as never);
+
+    await pi._emit("before_agent_start", { prompt: "task", systemPrompt: "ROLE" });
+    await pi._emit("agent_end", { messages: [{ role: "user", content: "x" }] });
+
+    // A turn did start (before_agent_start) and end (agent_end), so the
+    // busy/idle transition must be signalled even with no assistant message.
+    expect(callsTo(fetchMock, "/internal/turn-ended")).toHaveLength(1);
+  });
+
   it("still delivers handoffs even when the watchdog is disabled", async () => {
     ctxResponse = { ...ctxNonFinal, enforce: false };
     const pi = createMockPi();

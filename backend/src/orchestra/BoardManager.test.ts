@@ -317,6 +317,56 @@ describe("BoardManager granular CRUD", () => {
     expect(manager.getGraph(boardId)?.nodes.find((n) => n.id === "n1")?.label).toBe("Renamed");
   });
 
+  it("addNode persists the runtime field and non-secret runtimeConfig", () => {
+    const { manager, boardId } = seed();
+    const node = manager.addNode(boardId, {
+      label: "Hermes dev",
+      promptId: "p3",
+      runtime: "hermes",
+      runtimeConfig: { toolsets: "read,bash" },
+      position: { x: 200, y: 0 },
+    });
+    expect(node.runtime).toBe("hermes");
+    expect(node.runtimeConfig).toEqual({ toolsets: "read,bash" });
+    const persisted = manager.getGraph(boardId)?.nodes.find((n) => n.id === node.id);
+    expect(persisted?.runtime).toBe("hermes");
+    expect(persisted?.runtimeConfig).toEqual({ toolsets: "read,bash" });
+  });
+
+  it("addNode without a runtime persists no runtime (backward compat)", () => {
+    const { manager, boardId } = seed();
+    const node = manager.addNode(boardId, {
+      label: "Plain",
+      promptId: "p3",
+      position: { x: 200, y: 0 },
+    });
+    expect(node.runtime).toBeUndefined();
+    expect(node.runtimeConfig).toBeUndefined();
+  });
+
+  it("updateNode sets the runtime and runtimeConfig fields", () => {
+    const { manager, boardId } = seed();
+    const updated = manager.updateNode(boardId, "n2", {
+      runtime: "hermes",
+      runtimeConfig: { toolsets: "read" },
+    });
+    expect(updated.runtime).toBe("hermes");
+    expect(updated.runtimeConfig).toEqual({ toolsets: "read" });
+    // untouched fields preserved
+    expect(updated.label).toBe("Developer");
+    expect(updated.promptId).toBe("p2");
+    const persisted = manager.getGraph(boardId)?.nodes.find((n) => n.id === "n2");
+    expect(persisted?.runtime).toBe("hermes");
+  });
+
+  it("updateNode leaves runtime untouched when not in the patch", () => {
+    const { manager, boardId } = seed();
+    manager.updateNode(boardId, "n2", { runtime: "hermes" });
+    const after = manager.updateNode(boardId, "n2", { label: "Renamed" });
+    expect(after.runtime).toBe("hermes");
+    expect(after.label).toBe("Renamed");
+  });
+
   it("updateNode throws 'Node not found' for an unknown node", () => {
     const { manager, boardId } = seed();
     expect(() => manager.updateNode(boardId, "ghost", { label: "X" })).toThrow(

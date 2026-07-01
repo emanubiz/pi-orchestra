@@ -1,13 +1,12 @@
 import { EventEmitter } from "node:events";
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import pty, { type IPty } from "node-pty";
 import { getPrompt } from "../db/index.js";
-import type { NodeStatus, WorkflowEdge, WorkflowGraph, WorkflowNode } from "../types.js";
+import type { NodeRuntime, NodeStatus, WorkflowEdge, WorkflowGraph, WorkflowNode } from "../types.js";
 import { resolveCwd } from "../utils/paths.js";
+import type { INodeRuntime } from "./runtime/INodeRuntime.js";
+import { HermesRuntime } from "./runtime/HermesRuntime.js";
+import { isHermesRuntimeAvailable } from "./runtime/hermesAvailability.js";
+import { PiRuntime } from "./runtime/PiRuntime.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MAX_BUFFER = 256_000; // scrollback kept per node for re-attach
 // After pi reports `session_start` we give its TUI a brief moment to mount the
 // input line before pasting, so the first task can't race the initial render.
@@ -18,12 +17,26 @@ const READY_SETTLE_MS = 250;
 const READY_FALLBACK_MS = 10_000;
 // Default for the determinism watchdog when a board has no explicit override.
 const ENFORCE_DEFAULT = process.env.PINODES_ORCHESTRA_ENFORCE !== "false";
+// Nudge retries for the Hermes turn-ended watchdog before a non-final node
+// that won't hand off is reported as an error (see handleTurnEnded).
+const MAX_TURN_ENDED_RETRIES = 3;
+// ── Closed-loop submit confirmation (plan B) ─────────────────────────────────
+// After injecting a task (bracketed-paste + `\r`) we can't observe whether the
+// runtime's input line actually submitted it — a timing/async race can leave the
+// message sitting in the prompt, never sent (the pipeline then stalls silently).
+// So we close the loop on the *outcome*: the recipient starting a turn proves the
+// message reached the model. Each runtime POSTs /internal/turn-started when it
+// begins a turn (pi: before_agent_start; Hermes: pre_llm_call, once per turn).
+// If that confirmation doesn't arrive within SUBMIT_CONFIRM_MS of the submit, we
+// re-send just `\r` (the paste is already in the buffer) and retry up to
+// MAX_SUBMIT_RETRIES times before surfacing a "delivery may be stuck" error.
+const SUBMIT_CONFIRM_MS = 1_500;
+const MAX_SUBMIT_RETRIES = 3;
 const PORT = Number(
   process.env.PINODES_ORCHESTRA_PORT ?? process.env.PORT ?? 3847,
 );
 const BASE_URL =
   process.env.PINODES_ORCHESTRA_URL ?? `http://localhost:${PORT}`;
-const EXTENSION_PATH = path.resolve(__dirname, "../../pi-extensions/call-agent.ts");
 
 type BroadcastFn = (msg: Record<string, unknown>) => void;
 
@@ -34,69 +47,10 @@ interface BoardGraph {
 }
 
 interface Session {
-  pty: IPty;
-  buffer: string;
-  cols: number;
-  rows: number;
+  runtime: INodeRuntime;
+  chunks: string[];
+  bufferLen: number;
   startedAt: number;
-}
-
-// On Windows the `pi` launcher is `pi.cmd` (npm shim); `pi` with no extension
-// does not exist, so spawning it verbatim fails with ENOENT.
-const PI_BIN_NAMES = process.platform === "win32" ? ["pi.cmd", "pi.exe", "pi.bat", "pi"] : ["pi"];
-
-/** Search an executable in PATH, trying platform-specific extensions. */
-function findInPath(names: string[]): string | undefined {
-  const pathVar = process.env.PATH ?? "";
-  for (const dir of pathVar.split(path.delimiter)) {
-    for (const name of names) {
-      const candidate = path.join(dir, name);
-      if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
-        return candidate;
-      }
-    }
-  }
-  return undefined;
-}
-
-/** Resolve the `pi` CLI entry, falling back to the binary on PATH. */
-function resolvePiCommand(): { file: string; baseArgs: string[] } {
-  const candidates = [
-    path.resolve(__dirname, "../../node_modules/@earendil-works/pi-coding-agent/dist/cli.js"),
-    path.resolve(process.cwd(), "node_modules/@earendil-works/pi-coding-agent/dist/cli.js"),
-  ];
-  for (const c of candidates) {
-    if (fs.existsSync(c)) return { file: process.execPath, baseArgs: [c] };
-  }
-  const piBin = findInPath(PI_BIN_NAMES);
-  if (piBin) {
-    // On Windows `pi` on PATH is the npm batch shim `pi.cmd`. Spawning it forces
-    // node-pty through cmd.exe, which treats the first CRLF inside our multiline
-    // `--system-prompt` as end-of-command: it truncates the line and drops every
-    // argument after it — including `--extension …call-agent.ts`. pi then boots
-    // as a plain session with no orchestration extension and the nodes never see
-    // each other. Resolve the cli.js the shim itself runs and launch it with node
-    // directly (no shell), so args pass verbatim exactly like on Linux.
-    if (/\.(cmd|bat)$/i.test(piBin)) {
-      const cliFromShim = path.join(
-        path.dirname(piBin),
-        "node_modules",
-        "@earendil-works",
-        "pi-coding-agent",
-        "dist",
-        "cli.js",
-      );
-      if (fs.existsSync(cliFromShim)) {
-        return { file: process.execPath, baseArgs: [cliFromShim] };
-      }
-    }
-    return { file: piBin, baseArgs: [] };
-  }
-  console.error(
-    "pinodes-orchestra: pi CLI not found. Install `@earendil-works/pi-coding-agent` globally (npm i -g) " +
-      "or run `npm install` in the `backend` folder.",
-  );
-  return { file: PI_BIN_NAMES[0], baseArgs: [] };
 }
 
 function key(boardId: string, nodeId: string): string {
@@ -120,7 +74,19 @@ export class PtyHub {
   // Toggled live so the user can chat freely with one node without being asked
   // "handoff or done?", while the rest of the board stays enforced.
   private enforceOverride = new Map<string, boolean>();
-  private cmd = resolvePiCommand();
+  // Per-node retry counter for the Hermes turn-ended watchdog (handleTurnEnded).
+  private turnEndedRetries = new Map<string, number>();
+  // ── Closed-loop submit confirmation state ─────────────────────────────────
+  // Nodes with an injected task awaiting a turn-started confirmation. The watch
+  // is armed when the submit `\r` is written (see injectAndWatch) and disarmed
+  // by handleTurnStarted. If it fires, we re-send `\r` and re-arm.
+  private submitWatch = new Map<string, { retries: number; timer: NodeJS.Timeout }>();
+  // Nodes currently processing a turn (turn-started received, turn-ended not yet).
+  // An inject that lands while busy parks its watch here and arms it when the
+  // node goes idle — otherwise the watch would fire mid-turn, before the node
+  // could even read the pasted input.
+  private busy = new Set<string>();
+  private pendingArm = new Set<string>();
   private events = new EventEmitter();
 
   setBroadcast(fn: BroadcastFn): void {
@@ -218,7 +184,8 @@ export class PtyHub {
     const kanban = this.kanbanBoards.has(boardId);
     return {
       appendix:
-        this.connectionsAppendix(boardId, nodeId) + (kanban ? this.kanbanAppendix() : ""),
+        this.connectionsAppendix(boardId, nodeId) +
+        (kanban ? this.kanbanAppendix() : ""),
       canBeFinal: this.canBeFinal(boardId, nodeId),
       outgoing,
       kanban,
@@ -278,9 +245,24 @@ export class PtyHub {
     return this.graphs.get(boardId)?.nodes.get(nodeId)?.canBeFinal !== false;
   }
 
-  /** System-prompt appendix telling an agent which nodes it may hand off to. */
+  /** The runtime type of a node ("pi" | "hermes"); defaults to "pi" when absent.
+   *  Used to gate the server-side handoff nudge to Hermes only — pi enforces
+   *  explicit intent client-side in its extension (enforceIntent). */
+  private nodeRuntime(boardId: string, nodeId: string): NodeRuntime {
+    return this.graphs.get(boardId)?.nodes.get(nodeId)?.runtime ?? "pi";
+  }
+
+  /** System-prompt appendix telling an agent which nodes it may hand off to.
+   *  Runtime-agnostic: pi and Hermes share ONE text-sentinel protocol
+   *  (`@@HANDOFF`/`@@END`, `@@DONE`). pi parses it in its extension, Hermes in
+   *  the orchestra plugin's `transform_llm_output` hook — same instructions, same
+   *  delivery endpoint, so there's a single orchestration standard to reason
+   *  about (and nothing that can break on a per-runtime tool-call convention). */
   private connectionsAppendix(boardId: string, nodeId: string): string {
     const targets = this.outgoingTargets(boardId, nodeId);
+    const handles = this.handles(boardId);
+    const lines = targets.map((t) => `- ${handles.get(t.id)} — ${t.label}`).join("\n");
+
     if (targets.length === 0) {
       return (
         "\n\n## Orchestration\n" +
@@ -288,8 +270,7 @@ export class PtyHub {
         "When the task is finished, end your turn with `@@DONE` on its own line.\n"
       );
     }
-    const handles = this.handles(boardId);
-    const lines = targets.map((t) => `- ${handles.get(t.id)} — ${t.label}`).join("\n");
+
     // A non-final node must always pass the ball downstream; a final-capable one
     // may close the chain when its part truly finishes the task.
     const endingRule = this.canBeFinal(boardId, nodeId)
@@ -301,6 +282,17 @@ export class PtyHub {
         "done you are REQUIRED to hand off to one of the connected agents below — always close " +
         "your message with a @@HANDOFF block. Do not use @@DONE (it is not permitted for you). " +
         "(This rule can be lifted later at runtime.)\n";
+
+    const handoffInstruction =
+      "To delegate, end your message with a hand-off block in EXACTLY this " +
+      "format (no backticks, no text after @@END):\n\n" +
+      "@@HANDOFF:<recipient-handle>\n" +
+      "<complete, self-contained instructions: what you produced, files touched, what they must do>\n" +
+      "@@END\n\n" +
+      "The system delivers each hand-off automatically into the recipient's terminal.\n";
+
+    const doneExample = "if everything is fine, closes the chain with `@@DONE`.";
+
     return (
       "\n\n## Orchestration — you are one link in a pipeline of agents\n" +
       "CORE RULE: this runs as a pipeline — do your part, then hand the next step to the " +
@@ -314,19 +306,16 @@ export class PtyHub {
       lines +
       "\n\nIf the same role appears more than once (e.g. developer-1, developer-2) pick the " +
       "specific handle you want; they are separate agents working in parallel.\n\n" +
-      "To delegate, end your message with a hand-off block in EXACTLY this " +
-      "format (no backticks, no text after @@END):\n\n" +
-      "@@HANDOFF:<recipient-handle>\n" +
-      "<complete, self-contained instructions: what you produced, files touched, what they must do>\n" +
-      "@@END\n\n" +
-      "Example: an architect produces the plan/spec and hands it to the developer — it does NOT " +
+      handoffInstruction +
+      "\nExample: an architect produces the plan/spec and hands it to the developer — it does NOT " +
       "implement; the developer implements and hands off to QA/the auditor; the auditor reviews and, " +
-      "if everything is fine, closes the chain with `@@DONE`. The system delivers each hand-off " +
-      "automatically into the recipient's terminal.\n"
+      doneExample + "\n"
     );
   }
 
-  /** Appendix telling agents to advance the linked Kanban card by real state. */
+  /** Appendix telling agents to advance the linked Kanban card by real state.
+   *  Runtime-agnostic: pi and Hermes both emit a `@@CARD:<column>` text line
+   *  (parsed by the pi extension / the Hermes orchestra plugin respectively). */
   private kanbanAppendix(): string {
     return (
       "\n\n## Kanban — advancing the card\n" +
@@ -341,7 +330,7 @@ export class PtyHub {
   }
 
   /**
-   * Return a node's scrollback, spawning its pi terminal if needed.
+   * Return a node's scrollback, spawning its terminal if needed.
    * With spawnIfMissing=false it only mirrors an already-running session (used
    * by the read-only mini terminals so they never spawn a pi before the board's
    * graph — hence the right prompt/cwd — has reached the backend).
@@ -362,10 +351,13 @@ export class PtyHub {
       // did, the PTY width would no longer match the interactive xterm and pi's
       // input line would wrap on every keystroke. Mirrors may still *spawn* a
       // node (spawnIfMissing) without claiming resize authority (allowResize).
-      if (allowResize && cols && rows && (cols !== existing.cols || rows !== existing.rows)) {
-        this.resize(boardId, nodeId, cols, rows);
+      if (allowResize && cols && rows) {
+        const sz = existing.runtime.size();
+        if (sz && (cols !== sz.cols || rows !== sz.rows)) {
+          this.resize(boardId, nodeId, cols, rows);
+        }
       }
-      return existing.buffer;
+      return existing.chunks.join("");
     }
     if (!spawnIfMissing) return "";
     const graph = this.graphs.get(boardId);
@@ -397,73 +389,72 @@ export class PtyHub {
     const appendix =
       this.connectionsAppendix(boardId, nodeId) +
       (this.kanbanBoards.has(boardId) ? this.kanbanAppendix() : "");
-    const hasExtension = fs.existsSync(EXTENSION_PATH);
-    const systemPrompt = (hasExtension ? rolePrompt : rolePrompt + appendix).trim();
 
-    const args = [
-      ...this.cmd.baseArgs,
-      "--tools",
-      "read,bash,edit,write,grep",
-      "--session-id",
-      `${boardId}-${nodeId}`.replace(/[^a-zA-Z0-9-]/g, ""),
-      "--name",
-      node?.label ?? "pi",
-      "--system-prompt",
-      systemPrompt,
-    ];
-    if (hasExtension) args.push("--extension", EXTENSION_PATH);
+    const hermesEnabled = isHermesRuntimeAvailable();
+    const runtime: INodeRuntime =
+      node?.runtime === "hermes" && hermesEnabled
+        ? new HermesRuntime()
+        : new PiRuntime();
 
-    console.log("pinodes-orchestra: spawning pi", this.cmd.file, args);
-    const term = pty.spawn(this.cmd.file, args, {
-      name: "xterm-256color",
-      cols,
-      rows,
-      cwd,
-      env: {
-        ...process.env,
-        PINODES_ORCHESTRA_URL: BASE_URL,
-        PINODES_ORCHESTRA_BOARD: boardId,
-        PINODES_ORCHESTRA_NODE: nodeId,
-        PINODES_ORCHESTRA_FALLBACK_APPENDIX: appendix,
-        ...(process.env.PINODES_ORCHESTRA_TOKEN
-          ? { PINODES_ORCHESTRA_TOKEN: process.env.PINODES_ORCHESTRA_TOKEN }
-          : {}),
-      } as Record<string, string>,
-    });
-
-    const session: Session = { pty: term, buffer: "", cols, rows, startedAt: Date.now() };
     const k = key(boardId, nodeId);
-    this.sessions.set(k, session);
-    // A fresh session is not yet ready for input; the extension's session_start
-    // will mark it (or the fallback timeout in scheduleInject will).
     this.ready.delete(k);
     this.waitingInjects.delete(k);
+
+    const session: Session = { runtime, chunks: [], bufferLen: 0, startedAt: Date.now() };
+    this.sessions.set(k, session);
+
+    runtime.spawn({
+      boardId,
+      nodeId,
+      label: node?.label ?? "pi",
+      cwd,
+      cols,
+      rows,
+      systemPrompt: rolePrompt,
+      appendix,
+      orchestraUrl: BASE_URL,
+      runtimeConfig: node?.runtimeConfig,
+      onOutput: (data) => {
+        session.chunks.push(data);
+        session.bufferLen += data.length;
+        while (session.bufferLen > MAX_BUFFER) {
+          const excess = session.bufferLen - MAX_BUFFER;
+          const head = session.chunks[0];
+          if (head.length <= excess) {
+            session.chunks.shift();
+            session.bufferLen -= head.length;
+          } else {
+            session.chunks[0] = head.slice(excess);
+            session.bufferLen -= excess;
+          }
+        }
+        this.broadcast({ type: "pty_output", boardId, nodeId, data });
+      },
+      onExit: (exitCode) => {
+        // Only clear if this exact session is still the active one (guards
+        // restart): a stale exit from a killed session must NOT clear the
+        // restarted session's bookkeeping — including submit-watch state.
+        if (this.sessions.get(k) === session) {
+          this.sessions.delete(k);
+          this.ready.delete(k);
+          this.waitingInjects.delete(k);
+          this.clearSubmitState(k);
+        }
+        this.broadcast({ type: "pty_exit", boardId, nodeId, code: exitCode });
+        this.broadcast({ type: "node_status", boardId, nodeId, status: "idle" });
+        this.events.emit(`exit:${boardId}:${nodeId}`, exitCode ?? null);
+      },
+    });
+
     this.broadcast({ type: "node_status", boardId, nodeId, status: "running" });
     // Tell read-only mirrors the PTY's real size so they can render pi's
     // absolute-cursor output faithfully (and scale it down) instead of fitting
     // a narrower grid that would garble it.
     this.broadcast({ type: "pty_size", boardId, nodeId, cols, rows });
-
-    term.onData((data) => {
-      session.buffer = (session.buffer + data).slice(-MAX_BUFFER);
-      this.broadcast({ type: "pty_output", boardId, nodeId, data });
-    });
-
-    term.onExit(({ exitCode }) => {
-      // Only clear if this exact session is still the active one (guards restart).
-      if (this.sessions.get(k) === session) {
-        this.sessions.delete(k);
-        this.ready.delete(k);
-        this.waitingInjects.delete(k);
-      }
-      this.broadcast({ type: "pty_exit", boardId, nodeId, code: exitCode });
-      this.broadcast({ type: "node_status", boardId, nodeId, status: "idle" });
-      this.events.emit(`exit:${boardId}:${nodeId}`, exitCode ?? null);
-    });
   }
 
   input(boardId: string, nodeId: string, data: string): void {
-    this.sessions.get(key(boardId, nodeId))?.pty.write(data);
+    this.sessions.get(key(boardId, nodeId))?.runtime.write(data);
   }
 
   /**
@@ -509,14 +500,15 @@ export class PtyHub {
    * requested recipient against the sender's outgoing neighbours (by id OR name),
    * ensures the target terminal is running, and types the task into it. On
    * failure it tells the sender how to address its agents so the hand-off never
-   * fails silently. Returns immediately; injection happens once the target's pi
-   * is ready.
+   * fails silently. Returns immediately; injection happens once the target's
+   * runtime is ready.
    */
   deliverCall(
     boardId: string,
     fromNodeId: string,
     targetNodeId: string,
     message: string,
+    taskId?: string,
   ): { ok: boolean; message?: string; error?: string } {
     const target = this.resolveOutgoingTarget(boardId, fromNodeId, targetNodeId);
     if (!target) {
@@ -551,6 +543,7 @@ export class PtyHub {
       boardId,
       fromNodeId,
       toNodeId: target.id,
+      ...(taskId && { taskId }),
     });
 
     // The sender just handed off successfully, so clear any stale "handoff
@@ -566,7 +559,7 @@ export class PtyHub {
   }
 
   /**
-   * Feed a task into a node's pi terminal directly (e.g. launched from a Kanban
+   * Feed a task into a node's terminal directly (e.g. launched from a Kanban
    * card). No edge check — it's a user-initiated start, not an agent hand-off.
    */
   injectTask(boardId: string, nodeId: string, message: string): void {
@@ -574,38 +567,223 @@ export class PtyHub {
   }
 
   /**
-   * Mark a node's pi as booted (its extension reported `session_start`). Flushes
+   * Inject a message and arm a closed-loop delivery watch. The watch confirms
+   * the recipient actually *started a turn* (it received and submitted the
+   * message) by waiting for `handleTurnStarted`; if that confirmation doesn't
+   * arrive in time it re-sends just `\r` (the paste is already in the buffer)
+   * and retries, up to `MAX_SUBMIT_RETRIES`, before surfacing a "delivery may be
+   * stuck" error. If the node is currently busy in a turn, the watch is parked
+   * (pendingArm) and armed when the turn ends, so it can't fire mid-turn.
+   *
+   * This is the deterministic successor to guessing the paste→submit timing: it
+   * acts on the real outcome (a turn started) rather than a time estimate, so it
+   * covers every race regardless of its true cause. Agnostic to the runtime too
+   * — works for pi and Hermes, and would still cover a future `acp` runtime.
+   */
+  private injectAndWatch(boardId: string, nodeId: string, message: string): void {
+    const k = key(boardId, nodeId);
+    const s = this.sessions.get(k);
+    if (!s) return;
+    const arm = () => this.armSubmitWatch(boardId, nodeId);
+    // If the node is mid-turn, parking the watch avoids a false alarm: the node
+    // can't pick up the pasted input until its current turn ends, so a turn-start
+    // for THIS message can't arrive yet. handleTurnEnded arms it then.
+    //
+    // NB: the paste itself still happens now (during the turn), so this is
+    // best-effort for the busy case — if a TUI drops raw PTY bytes while
+    // processing, the later `\r` re-send submits empty. Self-healing for the
+    // submit race (the common failure), and strictly better than the old
+    // no-busy-handling; a fully deferred busy-inject would be a future refinement.
+    if (this.busy.has(k)) {
+      s.runtime.inject(message, () => this.pendingArm.add(k));
+      return;
+    }
+    s.runtime.inject(message, arm);
+  }
+
+  /** Arm the submit-confirmation watchdog for a fresh submit (retries reset
+   *  to 0). Only the timeout-driven re-send preserves/increments the count —
+   *  a brand-new inject that supersedes an unconfirmed one starts clean, so it
+   *  isn't penalised for the previous (possibly lost) submit's failures. */
+  private armSubmitWatch(boardId: string, nodeId: string): void {
+    const k = key(boardId, nodeId);
+    const prev = this.submitWatch.get(k);
+    if (prev) clearTimeout(prev.timer);
+    const timer = setTimeout(() => this.onSubmitWatchTimeout(boardId, nodeId), SUBMIT_CONFIRM_MS);
+    // unref so a pending watch never keeps the backend process alive on its own.
+    timer.unref?.();
+    this.submitWatch.set(k, { retries: 0, timer });
+  }
+
+  /** Disarm the submit watch — the recipient started a turn, so the submit
+   *  landed. Called by handleTurnStarted. */
+  private disarmSubmitWatch(boardId: string, nodeId: string): void {
+    const k = key(boardId, nodeId);
+    const w = this.submitWatch.get(k);
+    if (!w) return;
+    clearTimeout(w.timer);
+    this.submitWatch.delete(k);
+  }
+
+  /** Clear all closed-loop submit state for a node (kill/exit). Stops a timer
+   *  from re-sending `\r` into a terminal that no longer exists. */
+  private clearSubmitState(k: string): void {
+    const w = this.submitWatch.get(k);
+    if (w) clearTimeout(w.timer);
+    this.submitWatch.delete(k);
+    this.busy.delete(k);
+    this.pendingArm.delete(k);
+  }
+
+  /** Submit watch fired: no turn-started confirmation in time. Re-send `\r`
+   *  (the paste is already in the input buffer) and re-arm, up to the cap. */
+  private onSubmitWatchTimeout(boardId: string, nodeId: string): void {
+    const k = key(boardId, nodeId);
+    const w = this.submitWatch.get(k);
+    if (!w) return;
+    if (w.retries + 1 > MAX_SUBMIT_RETRIES) {
+      this.submitWatch.delete(k);
+      this.notify({
+        type: "node_status",
+        boardId,
+        nodeId,
+        status: "error",
+        message:
+          `Delivery may be stuck: a task was injected but the agent didn't ` +
+          `start a turn after ${MAX_SUBMIT_RETRIES} submit retries. Check the ` +
+          `terminal — the message may need a manual Enter.`,
+      });
+      return;
+    }
+    const timer = setTimeout(() => this.onSubmitWatchTimeout(boardId, nodeId), SUBMIT_CONFIRM_MS);
+    timer.unref?.();
+    this.submitWatch.set(k, { retries: w.retries + 1, timer });
+    // Re-send Enter only — the paste payload is already in the input buffer, so
+    // repeating the full paste would duplicate the text in the prompt.
+    this.sessions.get(k)?.runtime.write("\r");
+  }
+
+  /**
+   * `POST /internal/turn-started` bridge: the agent began a turn. This is the
+   * closed-loop confirmation that an injected task actually reached the model —
+   * proving the paste+submit landed (disarming the submit watch). Also marks the
+   * node busy so an inject that arrives mid-turn parks its watch until the turn
+   * ends (handleTurnEnded), instead of timing out before the node could read it.
+   *
+   * Both runtimes call this once per turn: pi in `before_agent_start`, Hermes in
+   * `pre_llm_call` (the plugin guards against double-signalling within a turn).
+   */
+  handleTurnStarted(boardId: string, nodeId: string): { ok: true } {
+    const k = key(boardId, nodeId);
+    this.busy.add(k);
+    this.disarmSubmitWatch(boardId, nodeId);
+    return { ok: true };
+  }
+
+  /**
+   * `POST /internal/turn-ended` bridge: the agent finished a turn. Two jobs:
+   *  1. Mark the node idle and arm any submit watch that was parked while it was
+   *     busy (an inject that landed mid-turn now needs its delivery confirmed).
+   *  2. For Hermes non-final nodes that didn't hand off, nudge — up to
+   *     MAX_TURN_ENDED_RETRIES — before reporting errored. (pi enforces explicit
+   *     intent client-side in its extension, so the server-side nudge is
+   *     Hermes-only.) The Hermes equivalent of pi's `enforceIntent` watchdog.
+   *
+   *  Note: pi signals turn-started/turn-ended as fire-and-forget POSTs, so when a
+   *  followUp loop starts immediately the next turn-started can race the previous
+   *  turn-ended and briefly flip `busy`. The consequence is bounded and
+   *  self-healing for pi (the server-side nudge is Hermes-only, so `busy` only
+   *  affects submit-watch parking). Hermes is immune: pre/post_llm_call are
+   *  sequential within a turn, never concurrent.
+   */
+  handleTurnEnded(
+    boardId: string,
+    nodeId: string,
+    handoffCalledThisTurn: boolean,
+  ): { ok: true; retries?: number; exceeded?: boolean } {
+    const k = key(boardId, nodeId);
+    this.busy.delete(k);
+    // An inject was parked while this node was busy — arm its watch now that the
+    // node can actually consume the pasted input and start a turn from it.
+    if (this.pendingArm.delete(k)) {
+      const s = this.sessions.get(k);
+      if (s) this.armSubmitWatch(boardId, nodeId);
+    }
+
+    const ctx = this.orchestraContext(boardId, nodeId);
+    // Server-side handoff nudge is Hermes-only: pi's extension enforces explicit
+    // intent itself (enforceIntent at agent_end). A final-capable node is free to
+    // end, so nothing to nudge either.
+    if (!ctx || ctx.canBeFinal || this.nodeRuntime(boardId, nodeId) !== "hermes") {
+      return { ok: true };
+    }
+    if (handoffCalledThisTurn) {
+      this.turnEndedRetries.delete(k);
+      return { ok: true };
+    }
+
+    const retries = (this.turnEndedRetries.get(k) ?? 0) + 1;
+    this.turnEndedRetries.set(k, retries);
+    if (retries > MAX_TURN_ENDED_RETRIES) {
+      this.turnEndedRetries.delete(k);
+      this.notify({
+        type: "node_status",
+        boardId,
+        nodeId,
+        status: "error",
+        message:
+          `Handoff not completed after ${MAX_TURN_ENDED_RETRIES} retries. ` +
+          `Expected the agent to emit a @@HANDOFF block delegating to a downstream agent.`,
+      });
+      return { ok: true, retries, exceeded: true };
+    }
+    const targets = ctx.outgoing.map((t) => t.handle).join(", ");
+    this.injectTask(
+      boardId,
+      nodeId,
+      `[orchestra] You must hand off to a downstream agent. ` +
+        `Close your message with a @@HANDOFF block to one of these recipients: ${targets}. ` +
+        `(Attempt ${retries}/${MAX_TURN_ENDED_RETRIES})`,
+    );
+    return { ok: true, retries };
+  }
+
+  /**
+   * Mark a node's agent as booted (its extension reported `session_start`). Flushes
    * any injects that were queued while it was still spawning.
    */
   markReady(boardId: string, nodeId: string): void {
     const k = key(boardId, nodeId);
-    if (!this.sessions.has(k)) return;
+    const s = this.sessions.get(k);
+    if (!s) return;
+    s.runtime.markReady();
     this.ready.set(k, true);
-    // Tell clients pi has actually booted so the "starting pi…" overlay clears at
+    // Tell clients the agent has actually booted so the "starting…" overlay clears at
     // the right moment on every OS. (Clients can't rely on the first PTY byte:
-    // Windows ConPTY emits terminal-init escape sequences immediately, before pi
-    // is up, which would hide the overlay too early.)
+    // Windows ConPTY emits terminal-init escape sequences immediately, before
+    // the agent is up, which would hide the overlay too early.)
     this.broadcast({ type: "node_ready", boardId, nodeId });
     const queued = this.waitingInjects.get(k);
     if (queued && queued.length) {
       this.waitingInjects.delete(k);
       // Give the TUI a beat to mount its input line before the first paste.
       setTimeout(() => {
-        for (const msg of queued) this.inject(boardId, nodeId, msg);
+        for (const msg of queued) this.injectAndWatch(boardId, nodeId, msg);
       }, READY_SETTLE_MS);
     }
   }
 
-  /** Whether a node's pi has booted (reported `session_start`). */
+  /** Whether a node's agent has booted (reported `session_start`). */
   isReady(boardId: string, nodeId: string): boolean {
     return this.ready.has(key(boardId, nodeId));
   }
 
   /**
-   * Ensure the node is running, then inject once its pi is ready. If the node
+   * Ensure the node is running, then inject once its agent is ready. If the node
    * has already reported ready the inject fires immediately; otherwise it is
    * queued and flushed by markReady (or a conservative fallback timeout, so a
-   * task is never dropped even if the extension never reports ready).
+   * task is never dropped even if the extension never reports ready). All injects
+   * go through `injectAndWatch`, which arms a closed-loop delivery watch.
    */
   private scheduleInject(boardId: string, nodeId: string, message: string): void {
     this.ensure(boardId, nodeId, 80, 24);
@@ -619,7 +797,7 @@ export class PtyHub {
       return;
     }
     if (this.ready.has(k)) {
-      this.inject(boardId, nodeId, message);
+      this.injectAndWatch(boardId, nodeId, message);
       return;
     }
     // Not ready yet → queue; flushed on markReady or on the fallback timeout.
@@ -631,28 +809,16 @@ export class PtyHub {
       const pending = this.waitingInjects.get(k);
       if (!pending || pending.length === 0) return;
       this.waitingInjects.delete(k);
-      for (const msg of pending) this.inject(boardId, nodeId, msg);
+      for (const msg of pending) this.injectAndWatch(boardId, nodeId, msg);
     }, READY_FALLBACK_MS);
-  }
-
-  /** Type text into a node's pi editor as a bracketed paste, then submit. */
-  private inject(boardId: string, nodeId: string, message: string): void {
-    const s = this.sessions.get(key(boardId, nodeId));
-    if (!s) return;
-    // Bracketed paste keeps embedded newlines from submitting early.
-    s.pty.write(`\x1b[200~${message}\x1b[201~`);
-    setTimeout(() => this.sessions.get(key(boardId, nodeId))?.pty.write("\r"), 80);
   }
 
   resize(boardId: string, nodeId: string, cols: number, rows: number): void {
     const s = this.sessions.get(key(boardId, nodeId));
     if (!s || !cols || !rows) return;
-    s.cols = cols;
-    s.rows = rows;
     try {
-      s.pty.resize(cols, rows);
+      s.runtime.resize(cols, rows);
     } catch (err) {
-      // terminal may have just exited
       console.error(`pinodes-orchestra: pty resize failed for ${boardId}:${nodeId}`, err);
     }
     // Keep read-only mirrors in sync with the new PTY dimensions.
@@ -661,11 +827,10 @@ export class PtyHub {
 
   /** Current PTY dimensions for a node, if it has a running session. */
   size(boardId: string, nodeId: string): { cols: number; rows: number } | undefined {
-    const s = this.sessions.get(key(boardId, nodeId));
-    return s ? { cols: s.cols, rows: s.rows } : undefined;
+    return this.sessions.get(key(boardId, nodeId))?.runtime.size();
   }
 
-  /** Kill and respawn a node's terminal (fresh pi session). */
+  /** Kill and respawn a node's terminal (fresh agent session). */
   restart(boardId: string, nodeId: string, cols: number, rows: number): void {
     this.kill(boardId, nodeId);
     this.spawn(boardId, nodeId, cols || 80, rows || 24);
@@ -678,10 +843,10 @@ export class PtyHub {
     this.sessions.delete(k);
     this.ready.delete(k);
     this.waitingInjects.delete(k);
+    this.clearSubmitState(k);
     try {
-      s.pty.kill();
+      s.runtime.kill();
     } catch (err) {
-      // already gone
       console.error(`pinodes-orchestra: pty kill failed for ${boardId}:${nodeId}`, err);
     }
   }
@@ -699,7 +864,7 @@ export class PtyHub {
     }
   }
 
-  /** Whether a node currently has a running pi session. */
+  /** Whether a node currently has a running agent session. */
   isNodeRunning(boardId: string, nodeId: string): boolean {
     return this.sessions.has(key(boardId, nodeId));
   }
@@ -727,7 +892,7 @@ export class PtyHub {
   }
 
   /**
-   * Wait for a node's pi session to exit. Resolves immediately if the node is
+   * Wait for a node's agent session to exit. Resolves immediately if the node is
    * not running. Returns `{ timedOut: true }` if the timeout fires first.
    */
   waitForExit(

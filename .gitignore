@@ -19,7 +19,8 @@ data/
 
 # Editor / OS / tooling
 .DS_Store
-.claude/
+.claude/*
+!.claude/settings.json
 .vscode/
 .idea/
 
@@ -29,3 +30,6 @@ data/
 # Logs
 *.log
 npm-debug.log*
+
+# Python bytecode (hermes plugin)
+__pycache__/

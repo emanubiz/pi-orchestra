@@ -1,7 +1,7 @@
 ## Verify (pre-commit checks)
 
 ```bash
-npm test --workspaces --if-present   # all unit tests (backend + frontend + vscode-extension)
+npm test --workspaces --if-present   # backend + frontend unit tests (vscode-extension is NOT a root workspace — see last line)
 npx tsc --noEmit -p backend          # typecheck backend
 npx tsc --noEmit -p frontend         # typecheck frontend
 npx tsc --noEmit -p vscode-extension # typecheck extension

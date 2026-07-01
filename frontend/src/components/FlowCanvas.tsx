@@ -13,6 +13,7 @@ import {
   type Edge,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import { Plus } from "lucide-react";
 import { AgentNode } from "./AgentNode";
 import { useRuntimeStore } from "../stores/runtimeStore";
 import { TerminalContext } from "../lib/termTheme";
@@ -53,6 +54,7 @@ interface FlowCanvasProps {
   send: (msg: Record<string, unknown>) => void;
   onExpand: (nodeId: string) => void;
   onEditPrompt: (nodeId: string) => void;
+  onAddAgent?: () => void;
 }
 
 function snapshotToFlow(
@@ -88,6 +90,7 @@ export function FlowCanvas({
   send,
   onExpand,
   onEditPrompt,
+  onAddAgent,
 }: FlowCanvasProps) {
   const initial = useMemo(
     () => snapshotToFlow(initialSnapshot, entryNodeId),
@@ -272,10 +275,20 @@ export function FlowCanvas({
         proOptions={{ hideAttribution: true }}
       >
         {nodes.length === 0 && (
-          <Panel position="top-center" className="pointer-events-none mt-20">
-            <div className="rounded-lg border border-zinc-800/80 bg-zinc-900/60 px-5 py-4 text-center">
-              <p className="text-sm text-zinc-400">Click a prompt above to add an agent</p>
-              <p className="mt-1 text-xs text-zinc-600">Connect the nodes to orchestrate the flow</p>
+          <Panel position="top-center" className="mt-20">
+            <div className="rounded-lg border border-zinc-800/80 bg-zinc-900/90 px-5 py-4 text-center shadow-lg">
+              <p className="text-sm text-zinc-400">Add your first agent</p>
+              <p className="mt-1 text-xs text-zinc-600">Pick a prompt, choose runtime, then connect nodes</p>
+              {onAddAgent && (
+                <button
+                  type="button"
+                  onClick={onAddAgent}
+                  className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-xs font-medium text-zinc-200 transition-colors hover:bg-white/10 hover:border-white/20 active:scale-[0.98]"
+                >
+                  <Plus size={14} strokeWidth={2} />
+                  Add agent
+                </button>
+              )}
             </div>
           </Panel>
         )}
@@ -311,6 +324,7 @@ export function flowToSnapshot(
         promptId: n.data.promptId,
         status: n.data.status ?? "idle",
         promptOverride: n.data.promptOverride,
+        runtime: n.data.runtime,
         isEntry: n.data.isEntry,
         canBeFinal: n.data.canBeFinal,
       },

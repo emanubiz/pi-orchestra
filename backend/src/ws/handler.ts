@@ -1,5 +1,6 @@
 import type { WebSocket } from "@fastify/websocket";
 import { ptyHub } from "../pty/PtyHub.js";
+import { isHermesRuntimeAvailable } from "../pty/runtime/hermesAvailability.js";
 import type { WorkflowGraph } from "../types.js";
 import { resolveCwd } from "../utils/paths.js";
 
@@ -34,7 +35,12 @@ export function attachWebSocket(ws: WebSocket): void {
     }
   });
 
-  ws.send(JSON.stringify({ type: "connected" }));
+  ws.send(
+    JSON.stringify({
+      type: "connected",
+      runtimes: { hermes: isHermesRuntimeAvailable() },
+    }),
+  );
 }
 
 function handleMessage(ws: WebSocket, msg: Record<string, unknown>): void {

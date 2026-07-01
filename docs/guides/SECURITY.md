@@ -9,7 +9,7 @@ current security posture, not a roadmap.
 
 The backend runs locally (or, opt-in, on a LAN) for a **single developer**.
 Nothing here assumes multi-user or internet-exposed deployments — those are out
-of scope (see [ARCHITECTURE.md](../ARCHITECTURE.md)).
+of scope (see [ARCHITECTURE.md](../../ARCHITECTURE.md)).
 
 The realistic attacker is **a web page the user visits while the backend is
 up** — a compromised site, a malicious ad, or a drive-by script — that opens a
@@ -122,6 +122,22 @@ Other quick checks:
   credential; a vault/HSM is overkill.
 - **No WS rate limiting** — single-user local backend, no abuse case.
 
+## Runtime configuration security
+
+Each node carries an optional `runtimeConfig: Record<string, unknown>` field,
+persisted in SQLite (`boards.graph_data`) and broadcast to the browser via
+WebSocket. **Never store secrets in `runtimeConfig`.**
+
+- ✅ Allowed: model name, toolset selection, feature flags, tuning parameters.
+- ❌ Forbidden: API keys, tokens, passwords, or any credential.
+
+Credentials live in the runtime's own config:
+- **pi**: `~/.pi/agent/auth.json` or env vars
+- **hermes**: `~/.hermes/` or `HERMES_API_KEY` env var
+
+This constraint is enforced by convention and documentation, not by the
+serializer — `runtimeConfig` is a generic JSON blob.
+
 ## Known limitations & future hardening
 
 These are not yet implemented. They are robustness/observability improvements
@@ -133,7 +149,8 @@ rather than open security holes — the browser→RCE vector is already closed.
 - **Deterministic graph sync.** The frontend uses a few magic `setTimeout`s
   before injecting a task; a `graph_synced` ack from the backend would remove
   the residual races on slow machines / large boards.
-- **WS handler tests.** `ws/handler.ts` is critical protocol code with no direct
-  tests; regressions there are currently caught only end-to-end.
-- **CI gate.** Only the publish-on-tag workflow exists; there is no test +
-  typecheck + build gate on PRs.
+- **CI gate.** Only the publish-on-tag workflow (`publish-extension.yml`) exists;
+  there is no test + typecheck + build gate on PRs.
+
+> Resolved since this doc was first written: `ws/handler.ts` now has direct unit
+> coverage (`backend/src/ws/handler.test.ts`).

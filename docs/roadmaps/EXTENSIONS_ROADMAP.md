@@ -57,14 +57,23 @@ Dedicated node type `runtime: "cursor"`:
 
 **Recommendation:** A now (already works), B for native Cursor nodes later, C inside VSCode/Cursor extension.
 
+Full feasibility analysis (gaps, risks, spike checklist):
+[plans/CURSOR_RUNTIME_ANALYSIS.md](../plans/CURSOR_RUNTIME_ANALYSIS.md) — **deferred**; Claude Code is the preferred next native runtime.
+
 Handoff: same `@@HANDOFF` block or structured `call_agent` if Cursor exposes it.
 
-### Hermes (🔜 planned)
+### Hermes (✅ PTY runtime — `hermes --tui`)
 
-- Spawn: TUI gateway JSON-RPC session per node (`prompt.submit`, `session.steer`, …)
-- Handoff: `delegate_task` or `@@HANDOFF` adapter
-- Intervention: gateway `session.steer` + terminal view of stream
-- See [HERMES_DESKTOP.md](./HERMES_DESKTOP.md)
+- Spawn: `hermes --tui` via `HermesRuntime` (same PTY/xterm path as pi)
+- Handoff: **same `@@HANDOFF` text protocol as pi**, parsed by the orchestra plugin's `transform_llm_output` hook (auto-installed into `~/.hermes/plugins/`)
+- Availability: auto-detected when `hermes` is on the backend PATH (`PINODES_ORCHESTRA_HERMES=false`/`true` overrides)
+- UI: **+ Add agent** modal — prompt picker, optional preview, runtime step before spawn; read-only **pi** / **hm** badge on the card
+- Guide: [guides/HERMES_RUNTIME.md](../guides/HERMES_RUNTIME.md)
+
+**Still open (host integration, not runtime):**
+
+- Hermes Desktop **Orchestra tab** (iframe to localhost) — see [guides/HERMES_DESKTOP.md](../guides/HERMES_DESKTOP.md)
+- Optional: JSON-RPC gateway session per node (alternative to PTY) — not planned; PTY path is shipped
 
 ### OpenClaw (🔜 planned)
 
@@ -92,7 +101,7 @@ Handoff: same `@@HANDOFF` block or structured `call_agent` if Cursor exposes it.
 
 ### 2. VS Code–compatible IDE extension — ✅ published (MVP)
 
-Lives in [`vscode-extension/`](../vscode-extension/README.md). **One extension**
+Lives in [`vscode-extension/`](../../vscode-extension/README.md). **One extension**
 serves VS Code, **Cursor**, **Windsurf**, and other forks via
 [Open VSX](https://open-vsx.org/extension/emanubiz/pinodes-orchestra-vscode)
 (and the VS Code Marketplace).
@@ -114,7 +123,7 @@ VSCode Workbench
 |-----------|----------|--------|
 | UI | `createWebviewPanel` framing the backend-served UI in an iframe via `vscode.env.asExternalUri` | ✅ |
 | Transport | localhost HTTP/WS — frontend talks to the backend origin directly inside the iframe | ✅ |
-| Backend | spawned as a Node subprocess from bundled `server/`; **one per window** on its own free port + isolated SQLite dir (see [MULTI_INSTANCE.md](./MULTI_INSTANCE.md)) | ✅ |
+| Backend | spawned as a Node subprocess from bundled `server/`; **one per window** on its own free port + isolated SQLite dir (see [MULTI_INSTANCE.md](../guides/MULTI_INSTANCE.md)) | ✅ |
 | cwd | `workspaceFolders[0]` passed as `?embed=vscode&cwd=…`; frontend binds the single board and hides the repo-tab switcher | ✅ |
 | Service worker | not registered in embedded mode (avoids stale-shell caching in the webview) | ✅ |
 | Native addons | no in-process `node-pty`/`better-sqlite3` — all in the subprocess | ✅ |
@@ -179,7 +188,7 @@ Hermes Desktop
 
 - User runs `npm run dev` for pinodes-orchestra
 - Uses Orchestra in browser while Hermes Desktop open
-- Document in [HERMES_DESKTOP.md](./HERMES_DESKTOP.md)
+- Document in [HERMES_DESKTOP.md](../guides/HERMES_DESKTOP.md)
 
 #### Phase H2 — Embedded tab (Hermes Desktop PR)
 
@@ -193,17 +202,17 @@ Hermes Desktop is Electron. Add:
 **pinodes-orchestra deliverables for H2:**
 
 - Stable `/api/health` + `/api/info` ✅
-- Programmatic API (see [PROGRAMMATIC_API.md](./PROGRAMMATIC_API.md))
+- Programmatic API (see [PROGRAMMATIC_API.md](../guides/PROGRAMMATIC_API.md))
 - Optional: `pinodes-orchestra serve --port 3847` single binary
 
 #### Phase H3 — Hermes-native nodes
 
-- `HermesRuntime` replaces pi spawn for `runtime: "hermes"` nodes
-- Orchestra tab unchanged; backends swap per node type
+- ✅ **`HermesRuntime`** — `hermes --tui` + orchestra plugin (feat/multi-runtime)
+- Orchestra tab unchanged; backends swap per node type via `runtime` field
 
 **Who implements H2:** Hermes Desktop team or fork; pinodes-orchestra provides embed contract.
 
-**Effort:** H1 = 0, H2 = ~1–2 weeks (Hermes side) + API P0 endpoints, H3 = ~3–4 weeks.
+**Effort:** H1 = 0, H2 = ~1–2 weeks (Hermes side) + API P0 endpoints, H3 runtime = ✅ shipped.
 
 ---
 
@@ -279,7 +288,7 @@ Orchestra provides:
 | `POST /api/v1/orchestra/flows` | High-level create+run ✅ |
 | `ws://…/ws` | Live control ✅ |
 
-Full spec: [PROGRAMMATIC_API.md](./PROGRAMMATIC_API.md).
+Full spec: [PROGRAMMATIC_API.md](../guides/PROGRAMMATIC_API.md).
 
 ---
 
@@ -292,8 +301,24 @@ Phase 2  ✅ VS Code–compatible extension (webview + bundled subprocess + Open
 Phase 3  🔜 Native Cursor agent nodes (`runtime: "cursor"`) — extension shell already works in Cursor/Windsurf
 Phase 4  🔜 Hermes H2 embed contract + optional Desktop PR
 Phase 5  🔜 OpenClaw O2 plugin (HTTP route + gateway method)
-Phase 6  🔜 Multi-runtime adapters (Hermes, OpenClaw, Cursor nodes)
+Phase 6  ✅ Multi-runtime adapters — pi + Hermes TUI shipped; OpenClaw/Cursor nodes remain
+Phase M1 🔜 Mobile Companion MVP (Pulse + Intervene) — see EXPANSION_MOBILE_AND_PHYSICAL.md
+Phase P1 🔜 PhysicalRuntime + edge device agent spec — same doc
 ```
+
+---
+
+## Future expansions (mobile & physical)
+
+Detailed vision (why / what / how, phases, API extensions, safety model):
+
+→ **[EXPANSION_MOBILE_AND_PHYSICAL.md](./EXPANSION_MOBILE_AND_PHYSICAL.md)**
+
+Summary:
+
+- **Mobile Companion** — remote client (Expo/PWA): Pulse, Intervene, Kanban, push; backend stays on dev machine/VPS; reuses programmatic API + WS.
+- **Physical Runtime** — `runtime: "physical"` nodes, edge agents on real machines, `physicalClass` + approval gates; same handoff contract as pi/Hermes.
+- **Voice** — input channel to inject/approve (not a replacement UI).
 
 ---
 
@@ -310,6 +335,9 @@ Phase 6  🔜 Multi-runtime adapters (Hermes, OpenClaw, Cursor nodes)
 
 ## Related docs
 
-- [ARCHITECTURE.md](../ARCHITECTURE.md) — current standalone design
-- [HERMES_DESKTOP.md](./HERMES_DESKTOP.md) — Hermes Desktop deep dive
-- [PROGRAMMATIC_API.md](./PROGRAMMATIC_API.md) — REST/CLI contract for hosts
+- [ARCHITECTURE.md](../../ARCHITECTURE.md) — current standalone design
+- [guides/HERMES_RUNTIME.md](../guides/HERMES_RUNTIME.md) — Hermes TUI nodes (operational)
+- [guides/HERMES_DESKTOP.md](../guides/HERMES_DESKTOP.md) — Hermes Desktop deep dive
+- [guides/PROGRAMMATIC_API.md](../guides/PROGRAMMATIC_API.md) — REST/CLI contract for hosts
+- [EXPANSION_MOBILE_AND_PHYSICAL.md](./EXPANSION_MOBILE_AND_PHYSICAL.md) — Mobile Companion + Physical Runtime vision
+- [docs/README.md](../README.md) — full documentation index

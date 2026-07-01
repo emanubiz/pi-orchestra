@@ -80,4 +80,21 @@ describe("ws/handler load_graph", () => {
     expect(setGraph).toHaveBeenCalledOnce();
     expect(h.sent.some((s) => s.includes('"type":"connected"'))).toBe(true);
   });
+
+  it("sends runtime capabilities on connect", () => {
+    const prev = process.env.PINODES_ORCHESTRA_HERMES;
+    process.env.PINODES_ORCHESTRA_HERMES = "true";
+    try {
+      const h = createHarness();
+      const connected = JSON.parse(h.sent[0]!) as {
+        type: string;
+        runtimes?: { hermes?: boolean };
+      };
+      expect(connected.type).toBe("connected");
+      expect(connected.runtimes?.hermes).toBe(true);
+    } finally {
+      if (prev === undefined) delete process.env.PINODES_ORCHESTRA_HERMES;
+      else process.env.PINODES_ORCHESTRA_HERMES = prev;
+    }
+  });
 });

@@ -16,7 +16,9 @@ import {
   updatePrompt,
 } from "./db/index.js";
 import { ptyHub } from "./pty/PtyHub.js";
+import { isHermesRuntimeAvailable } from "./pty/runtime/hermesAvailability.js";
 import { orchestraRoutes } from "./routes/orchestra.js";
+
 import type { WorkflowGraph } from "./types.js";
 import {
   buildAllowedOrigins,
@@ -69,6 +71,9 @@ app.get("/api/health", async () => ({
   name: "pinodes-orchestra",
   version: "0.1.0",
   port: PORT,
+  runtimes: {
+    hermes: isHermesRuntimeAvailable(),
+  },
 }));
 
 /** Server info for clients that need a sensible default cwd (browser has no process.cwd). */
@@ -79,14 +84,23 @@ app.get("/api/info", async () => ({
   port: PORT,
   defaultCwd: process.cwd(),
   wsPath: "/ws",
+  runtimes: {
+    hermes: isHermesRuntimeAvailable(),
+  },
 }));
 
 // Called by the call_agent extension running inside a node's pi terminal.
 app.post<{
-  Body: { boardId: string; fromNodeId: string; targetNodeId: string; message: string };
+  Body: {
+    boardId: string;
+    fromNodeId: string;
+    targetNodeId: string;
+    message: string;
+    taskId?: string;
+  };
 }>("/internal/call-agent", async (req) => {
-  const { boardId, fromNodeId, targetNodeId, message } = req.body;
-  return ptyHub.deliverCall(boardId, fromNodeId, targetNodeId, message);
+  const { boardId, fromNodeId, targetNodeId, message, taskId } = req.body;
+  return ptyHub.deliverCall(boardId, fromNodeId, targetNodeId, message, taskId);
 });
 
 // Called by the extension when an agent advances the linked Kanban card.
@@ -125,6 +139,29 @@ app.post<{ Body: { boardId: string; nodeId: string } }>(
     return { ok: true };
   },
 );
+
+// Closed-loop submit confirmation (plan B): the agent began a turn, which
+// proves an injected task's paste+submit actually reached the model. Both
+// runtimes POST this once per turn (pi: before_agent_start; Hermes: pre_llm_call
+// — the plugin guards against double-signalling within a turn). PtyHub disarms
+// the submit watch and marks the node busy so a mid-turn inject parks its watch.
+app.post<{ Body: { boardId: string; nodeId: string } }>(
+  "/internal/turn-started",
+  async (req) => {
+    const { boardId, nodeId } = req.body;
+    return ptyHub.handleTurnStarted(boardId, nodeId);
+  },
+);
+
+// Hermes post_llm_call hook: the agent finished a turn. Delegates to PtyHub,
+// which owns the retry state and nudge/error logic (see handleTurnEnded) —
+// this is the Hermes equivalent of pi's client-side explicit-intent watchdog.
+app.post<{
+  Body: { boardId: string; nodeId: string; handoffCalledThisTurn: boolean };
+}>("/internal/turn-ended", async (req) => {
+  const { boardId, nodeId, handoffCalledThisTurn } = req.body;
+  return ptyHub.handleTurnEnded(boardId, nodeId, handoffCalledThisTurn);
+});
 
 // The determinism watchdog gave up after retries — surface it on the node card.
 app.post<{

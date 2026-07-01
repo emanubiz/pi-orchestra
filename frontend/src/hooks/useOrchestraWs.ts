@@ -25,6 +25,7 @@ export function useOrchestraWs(
 
   const {
     setConnected,
+    setHermesAvailable,
     setNodeStatus,
     setNodeError,
     clearNodeError,
@@ -72,6 +73,10 @@ export function useOrchestraWs(
         switch (msg.type) {
           case "connected":
             setConnected(true);
+            if (msg.runtimes && typeof msg.runtimes === "object") {
+              const rt = msg.runtimes as Record<string, unknown>;
+              if (typeof rt.hermes === "boolean") setHermesAvailable(rt.hermes);
+            }
             break;
           case "node_status":
             const rawStatus = msg.status as string;
@@ -178,7 +183,7 @@ export function useOrchestraWs(
       wsRef.current = null;
       setConnected(false);
     };
-  }, [setConnected, setNodeStatus, appendChat, appendStream, flushStream]);
+  }, [setConnected, setHermesAvailable, setNodeStatus, setNodeError, clearNodeError, setEnforcement, appendChat, appendStream, flushStream]);
 
   // Stable identity: relies only on refs, so consumers (e.g. the terminal)
   // don't tear down on every render.

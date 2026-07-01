@@ -27,10 +27,10 @@ Listen port is set by `PORT` (default 3847). `PINODES_ORCHESTRA_URL` overrides t
 
 ```http
 GET /api/health
-→ { ok, name, version, port }
+→ { ok, name, version, port, runtimes: { hermes } }
 
 GET /api/info
-→ { ok, name, version, port, defaultCwd, wsPath }
+→ { ok, name, version, port, defaultCwd, wsPath, runtimes: { hermes } }
 ```
 
 > Both endpoints are stable and used by host integrations (VSCode, Hermes, OpenClaw) for readiness checks.
@@ -75,8 +75,8 @@ POST /api/v1/orchestra/boards/:boardId/nodes/:nodeId/stop
 POST /api/v1/orchestra/boards/:boardId/nodes/:nodeId/inject   { message: string }
 POST /api/v1/orchestra/boards/:boardId/nodes/:nodeId/input    { data: string }
 
-POST /api/v1/orchestra/boards/:boardId/nodes              { label, promptId, position, id?, promptOverride?, canBeFinal? }
-PATCH /api/v1/orchestra/boards/:boardId/nodes/:nodeId     { label?, promptId?, promptOverride?, canBeFinal?, position? }
+POST /api/v1/orchestra/boards/:boardId/nodes              { label, promptId, position, id?, promptOverride?, canBeFinal?, runtime?, runtimeConfig? }
+PATCH /api/v1/orchestra/boards/:boardId/nodes/:nodeId     { label?, promptId?, promptOverride?, canBeFinal?, runtime?, runtimeConfig?, position? }
 DELETE /api/v1/orchestra/boards/:boardId/nodes/:nodeId
 
 POST /api/v1/orchestra/boards/:boardId/edges              { sourceNodeId, targetNodeId, id? }
@@ -94,11 +94,13 @@ POST /api/validate-path    { path }
 → { ok, path } | { ok: false, error }
 ```
 
-### Internal (pi extension callbacks)
+### Internal (agent-runtime callbacks)
 
-These are called by `backend/pi-extensions/call-agent.ts` running inside each
-node's pi terminal. When `PINODES_ORCHESTRA_TOKEN` is set, they require the same
-auth headers as other routes (the pi extension reads the token from its PTY env).
+These are called by the runtime bridge running inside each node's terminal —
+the pi extension (`backend/pi-extensions/call-agent.ts`) or the Hermes plugin
+(`backend/hermes-plugins/orchestra/`). When `PINODES_ORCHESTRA_TOKEN` is set,
+they require the same auth headers as other routes (the bridges read the token
+from their PTY env).
 
 ```http
 POST /internal/call-agent      { boardId, fromNodeId, targetNodeId, message }
@@ -108,6 +110,8 @@ GET  /internal/orchestra-context?boardId=&nodeId=
   → 404 if the board/node is unknown (extension degrades to its baked fallback appendix)
   # `enforce` is the per-node determinism-watchdog flag (false → free-chat mode)
 POST /internal/ready           { boardId, nodeId }              # session_start → flush queued injects
+POST /internal/turn-started    { boardId, nodeId }              # agent began a turn → closed-loop submit confirm, node busy
+POST /internal/turn-ended      { boardId, nodeId, handoffCalledThisTurn }  # node idle; Hermes-only handoff nudge
 POST /internal/handoff-failed  { boardId, nodeId, reason, recipients? }  # watchdog gave up → node card error
 ```
 
@@ -260,8 +264,8 @@ curl -s http://localhost:3847/api/v1/orchestra/flows \
 
 Standalone localhost deployments can run with no auth (default). The **VS Code
 extension auto-generates an ephemeral token per session** even when none is
-configured — see [`vscode-extension/src/sessionToken.ts`](../vscode-extension/src/sessionToken.ts)
-and [`docs/SECURITY.md`](./SECURITY.md).
+configured — see [`vscode-extension/src/sessionToken.ts`](../../vscode-extension/src/sessionToken.ts)
+and [`SECURITY.md`](./SECURITY.md).
 
 For remote embeds or programmatic consumers, set the environment variable:
 
@@ -292,7 +296,8 @@ code `4002` on the handshake.
 The `pinodes-orchestra` CLI wraps the REST API for scripting and CI.
 
 **Installation & Setup**
-Run via npm: `npm run cli -- <command>`
+Run from the backend workspace (the `cli` script lives in `backend/package.json`,
+not the repo root): `npm run cli -w backend -- <command>` (or `cd backend && npm run cli -- <command>`).
 Env vars: `PINODES_ORCHESTRA_URL` (default `http://localhost:3847`), `PINODES_ORCHESTRA_TOKEN`.
 
 **Available Commands:**
@@ -359,22 +364,38 @@ ws.onopen = () => {
 
 ---
 
-## Planned — node runtime field
+## Node runtime field (implemented)
+
+`runtime?: "pi" | "hermes"` and `runtimeConfig?: Record<string, unknown>`.
+Hermes is auto-detected when the `hermes` CLI is on the backend PATH (see
+[HERMES_RUNTIME.md](./HERMES_RUNTIME.md)). Optional `PINODES_ORCHESTRA_HERMES=false`
+disables it; `true` forces it on.
+
+In the **web UI**, runtime is set when creating a node (`POST` equivalent via the add-agent
+flow) and is not editable afterward. The REST API still accepts `runtime` on `PATCH` for
+programmatic updates (restarting the PTY is the caller's responsibility).
+
+`runtimeConfig` fields recognized by the runtimes (unrecognized fields are
+silently ignored, so the shape can grow without a migration):
+
+| Field | Type | Effect | Runtimes |
+|---|---|---|---|
+| `toolset` | `string` | Overrides the default tool list passed as `--tools`/`-t`. **Runtime-specific vocabularies:** pi uses `read,bash,edit,write,grep` (default); Hermes uses its own toolset names (`file,terminal,web,…` — see `hermes tools list`, default `file,terminal`). Ignored if blank or not a string — falls back to that runtime's default. | pi, hermes |
 
 ```typescript
 interface WorkflowNode {
   // ...existing fields
-  runtime?: "pi" | "cursor" | "hermes" | "openclaw";
-  runtimeConfig?: Record<string, unknown>;
+  runtime?: "pi" | "hermes";           // ✅ implemented
+  runtimeConfig?: Record<string, unknown>;  // ✅ implemented (no secrets!)
 }
 ```
 
 | runtime | spawn |
 |---------|-------|
-| `pi` (default) | `pi` CLI via PtyHub |
-| `cursor` | Cursor agent via SDK / CLI bridge |
-| `hermes` | TUI gateway session |
-| `openclaw` | Gateway `agent` RPC |
+| `pi` (default) | `pi` CLI via PtyHub → PiRuntime |
+| `hermes` | `hermes --tui` via PtyHub → HermesRuntime (feature flag) |
+| `cursor` | planned |
+| `openclaw` | planned |
 
 ---
 

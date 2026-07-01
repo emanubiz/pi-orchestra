@@ -5,7 +5,7 @@ import { AgentNode } from "./AgentNode";
 import { TerminalContext } from "../lib/termTheme";
 import { useRuntimeStore } from "../stores/runtimeStore";
 import { emitNodeReady } from "../lib/ptyBus";
-import type { NodeStatus } from "../types";
+import type { NodeStatus, WorkflowNodeData } from "../types";
 
 // Mock @xyflow/react Handle so it doesn't require ReactFlowProvider
 vi.mock("@xyflow/react", () => ({
@@ -56,6 +56,7 @@ function resetStore() {
     overlayNodeId: null,
     prompts: [],
     runPromptDraft: "",
+    hermesAvailable: null,
   });
 }
 
@@ -245,5 +246,41 @@ describe("AgentNode — refresh button", () => {
     const restoredBtn = screen.getByTitle("Restart pi (pick up config/extension changes)");
     expect(restoredBtn).toBeTruthy();
     expect((restoredBtn as HTMLButtonElement).disabled).toBe(false);
+  });
+});
+
+describe("AgentNode — runtime badge", () => {
+  beforeEach(() => {
+    resetStore();
+    vi.clearAllMocks();
+  });
+
+  function renderNode(data: WorkflowNodeData = baseData) {
+    return render(
+      <TerminalContext.Provider value={terminalCtx}>
+        <AgentNode
+          id="n1"
+          data={data}
+          selected={false}
+          type="agent"
+          dragging={false}
+          zIndex={0}
+          selectable
+          deletable
+          draggable
+          isConnectable
+          positionAbsoluteX={0}
+          positionAbsoluteY={0}
+          targetPosition={Position.Left}
+          sourcePosition={Position.Right}
+        />
+      </TerminalContext.Provider>,
+    );
+  }
+
+  it("shows read-only runtime badge (no toggle)", () => {
+    renderNode({ ...baseData, runtime: "hermes" });
+    expect(screen.getByText("hm")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "pi" })).toBeNull();
   });
 });

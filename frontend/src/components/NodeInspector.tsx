@@ -3,6 +3,7 @@ import { Play } from "lucide-react";
 import type { Node } from "@xyflow/react";
 import { useRuntimeStore } from "../stores/runtimeStore";
 import type { SystemPrompt, WorkflowNodeData } from "../types";
+import { RuntimeBadge } from "./RuntimeBadge";
 
 interface NodeInspectorProps {
   boardId: string;
@@ -74,6 +75,12 @@ export function NodeInspector({
         >
           {entryNodeId === selectedNodeId ? "Entry" : "Set entry"}
         </button>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] text-zinc-500">Runtime</span>
+        <RuntimeBadge runtime={node.data.runtime ?? "pi"} />
+        <span className="text-[10px] text-zinc-600">(locked)</span>
       </div>
 
       <div className="flex flex-wrap gap-1">

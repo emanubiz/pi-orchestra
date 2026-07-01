@@ -473,6 +473,78 @@ describe("orchestra routes", () => {
     expect(JSON.parse(del.body)).toEqual({ ok: true });
   });
 
+  it("accepts and preserves runtime / runtimeConfig on node create and patch", async () => {
+    const { app } = await buildApp();
+    const boardId = await boardWithGraph(app);
+
+    // POST node with runtime + non-secret runtimeConfig
+    const add = await app.inject({
+      method: "POST",
+      url: `/api/v1/orchestra/boards/${boardId}/nodes`,
+      payload: {
+        label: "Hermes dev",
+        promptId: "p3",
+        runtime: "hermes",
+        runtimeConfig: { toolsets: "read,bash" },
+        position: { x: 200, y: 0 },
+      },
+    });
+    expect(add.statusCode).toBe(200);
+    const node = JSON.parse(add.body).node;
+    expect(node.runtime).toBe("hermes");
+    expect(node.runtimeConfig).toEqual({ toolsets: "read,bash" });
+
+    // PATCH the runtime back to pi
+    const patch = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/orchestra/boards/${boardId}/nodes/${node.id}`,
+      payload: { runtime: "pi" },
+    });
+    expect(patch.statusCode).toBe(200);
+    expect(JSON.parse(patch.body).node.runtime).toBe("pi");
+
+    // GET graph must preserve the field
+    const get = await app.inject({
+      method: "GET",
+      url: `/api/v1/orchestra/boards/${boardId}/graph`,
+    });
+    const graph = JSON.parse(get.body) as WorkflowGraph;
+    const saved = graph.nodes.find((n) => n.id === node.id);
+    expect(saved?.runtime).toBe("pi");
+  });
+
+  it("preserves runtime fields through a full-graph PUT", async () => {
+    const { app } = await buildApp();
+    const create = await app.inject({
+      method: "POST",
+      url: "/api/v1/orchestra/boards",
+      payload: { cwd: "/tmp" },
+    });
+    const boardId = JSON.parse(create.body).boardId;
+
+    const graphWithRuntime: WorkflowGraph = {
+      ...sampleGraph,
+      nodes: [
+        { ...sampleGraph.nodes[0], runtime: "pi" },
+        { ...sampleGraph.nodes[1], runtime: "hermes", runtimeConfig: { toolsets: "read" } },
+      ],
+    };
+    await app.inject({
+      method: "PUT",
+      url: `/api/v1/orchestra/boards/${boardId}/graph`,
+      payload: graphWithRuntime,
+    });
+
+    const get = await app.inject({
+      method: "GET",
+      url: `/api/v1/orchestra/boards/${boardId}/graph`,
+    });
+    const graph = JSON.parse(get.body) as WorkflowGraph;
+    expect(graph.nodes.find((n) => n.id === "arch")?.runtime).toBe("pi");
+    expect(graph.nodes.find((n) => n.id === "dev")?.runtime).toBe("hermes");
+    expect(graph.nodes.find((n) => n.id === "dev")?.runtimeConfig).toEqual({ toolsets: "read" });
+  });
+
   it("validates node creation and 404s unknown nodes", async () => {
     const { app } = await buildApp();
     const boardId = await boardWithGraph(app);

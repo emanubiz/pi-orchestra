@@ -7,6 +7,7 @@ import { TerminalPanel } from "./components/TerminalPanel";
 import { TerminalOverlay } from "./components/TerminalOverlay";
 import { KanbanBoard } from "./components/KanbanBoard";
 import { PromptLibrary } from "./components/PromptLibrary";
+import { AddAgentModal, type AddAgentChoice } from "./components/AddAgentModal";
 import { WorkflowPicker } from "./components/WorkflowPicker";
 import { NodeInspector } from "./components/NodeInspector";
 import { TimelinePanel } from "./components/TimelinePanel";
@@ -27,6 +28,7 @@ export function App() {
   const [panelOpen, setPanelOpen] = useState(false);
   const [rightTab, setRightTab] = useState<"terminal" | "timeline" | "inspector">("terminal");
   const [view, setView] = useState<"agents" | "kanban">("agents");
+  const [addAgentOpen, setAddAgentOpen] = useState(false);
 
   const boards = useBoardStore((s) => s.boards);
   const activeBoardId = useBoardStore((s) => s.activeBoardId);
@@ -69,6 +71,7 @@ export function App() {
   const setPrompts = useRuntimeStore((s) => s.setPrompts);
   const setActiveBoardId = useRuntimeStore((s) => s.setActiveBoardId);
   const clearBoardRuntime = useRuntimeStore((s) => s.clearBoardRuntime);
+  const setHermesAvailable = useRuntimeStore((s) => s.setHermesAvailable);
 
   useEffect(() => {
     // Embedded host (VS Code) provides the workspace cwd directly: bind the
@@ -79,14 +82,17 @@ export function App() {
     }
     void apiFetch("/api/info")
       .then((r) => r.json())
-      .then((data: { defaultCwd?: string }) => {
+      .then((data: { defaultCwd?: string; runtimes?: { hermes?: boolean } }) => {
         if (data.defaultCwd) setDefaultCwd(data.defaultCwd);
+        if (typeof data.runtimes?.hermes === "boolean") {
+          setHermesAvailable(data.runtimes.hermes);
+        }
       })
       .catch((err) => {
         console.error("pinodes-orchestra: /api/info unreachable", err);
         /* backend offline — BoardTabs will use "." */
       });
-  }, [setDefaultCwd, bindWorkspace]);
+  }, [setDefaultCwd, bindWorkspace, setHermesAvailable]);
 
   useEffect(() => {
     setActiveBoardId(activeBoard.id);
@@ -156,7 +162,7 @@ export function App() {
     }
   }, [activeBoard.id]); // sync on board mount
 
-  const addNodeFromPrompt = (prompt: SystemPrompt) => {
+  const addNodeFromChoice = ({ prompt, runtime }: AddAgentChoice) => {
     const id = crypto.randomUUID();
     const existing = flowRef.current?.getNodes() ?? [];
     const node: Node<WorkflowNodeData> = {
@@ -168,10 +174,12 @@ export function App() {
         promptId: prompt.id,
         status: "idle",
         isEntry: false,
+        runtime,
       },
     };
     flowRef.current?.addNode(node);
     useRuntimeStore.getState().setSelectedNodeId(id);
+    setAddAgentOpen(false);
     setTimeout(() => {
       const nodes = flowRef.current?.getNodes() ?? [];
       const edges = flowRef.current?.getEdges() ?? [];
@@ -209,6 +217,8 @@ export function App() {
         promptId: n.promptId,
         status: "idle" as const,
         promptOverride: n.promptOverride ?? undefined,
+        runtime: n.runtime ?? undefined,
+        runtimeConfig: n.runtimeConfig ?? undefined,
         isEntry: n.id === graph.entryNodeId,
         canBeFinal: n.canBeFinal ?? undefined,
       },
@@ -389,7 +399,7 @@ export function App() {
         {!IS_EMBEDDED && <BoardTabs onBoardSwitch={handleBoardSwitch} />}
 
         <div className="flex flex-1 flex-col min-w-0">
-          <PromptLibrary prompts={prompts} onRefresh={loadPrompts} onAddNode={addNodeFromPrompt} />
+          <PromptLibrary onAddAgent={() => setAddAgentOpen(true)} />
 
           <div className="flex flex-1 min-h-0">
             <div className="flex-[2] min-w-0">
@@ -403,6 +413,7 @@ export function App() {
                 send={send}
                 onExpand={setOverlayNodeId}
                 onEditPrompt={setPromptEditNodeId}
+                onAddAgent={() => setAddAgentOpen(true)}
               />
             </div>
 
@@ -433,7 +444,13 @@ export function App() {
 
               <div className="flex-1 min-h-0 flex flex-col">
                 {rightTab === "terminal" && (
-                  <TerminalPanel boardId={activeBoard.id} send={send} />
+                  <TerminalPanel
+                    boardId={activeBoard.id}
+                    send={send}
+                    getSelectedNode={() =>
+                      flowRef.current?.getNode(useRuntimeStore.getState().selectedNodeId ?? "")
+                    }
+                  />
                 )}
                 {rightTab === "timeline" && (
                   <TimelinePanel
@@ -478,6 +495,15 @@ export function App() {
           label={overlayNode?.data.label ?? "pi"}
           send={send}
           onClose={() => setOverlayNodeId(null)}
+        />
+      )}
+
+      {addAgentOpen && (
+        <AddAgentModal
+          prompts={prompts}
+          onClose={() => setAddAgentOpen(false)}
+          onConfirm={addNodeFromChoice}
+          onRefreshPrompts={() => void loadPrompts()}
         />
       )}
 

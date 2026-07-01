@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { RotateCw, Square } from "lucide-react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import type { Node } from "@xyflow/react";
 import "@xterm/xterm/css/xterm.css";
 import { useRuntimeStore } from "../stores/runtimeStore";
 import { confirmPiRestart, usePiRestartState } from "../hooks/usePiRestartState";
@@ -9,15 +10,19 @@ import { onPtyExit, onPtyOutput } from "../lib/ptyBus";
 import { fitWhenReady } from "../lib/termFit";
 import { TERM_FONT, TERM_THEME } from "../lib/termTheme";
 import { attachClipboard } from "../lib/termClipboard";
+import type { WorkflowNodeData } from "../types";
 
 interface TerminalPanelProps {
   boardId: string;
   send: (msg: Record<string, unknown>) => void;
+  getSelectedNode: () => Node<WorkflowNodeData> | undefined;
 }
 
 
-export function TerminalPanel({ boardId, send }: TerminalPanelProps) {
+export function TerminalPanel({ boardId, send, getSelectedNode }: TerminalPanelProps) {
   const selectedNodeId = useRuntimeStore((s) => s.selectedNodeId);
+  const node = selectedNodeId ? getSelectedNode() : undefined;
+  const runtime = node?.data.runtime ?? "pi";
   const status = useRuntimeStore((s) =>
     selectedNodeId ? s.nodeStatus[`${boardId}:${selectedNodeId}`] : undefined,
   );
@@ -54,7 +59,7 @@ export function TerminalPanel({ boardId, send }: TerminalPanelProps) {
       term.write(data);
     });
     const unsubExit = onPtyExit(key, () => {
-      term.write("\r\n\x1b[2m- pi session ended - use Restart -\x1b[0m\r\n");
+      term.write(`\r\n\x1b[2m- ${runtime} session ended - use Restart -\x1b[0m\r\n`);
     });
 
     const onData = term.onData((data) => send({ type: "pty_input", nodeId: selectedNodeId, data }));
@@ -135,7 +140,7 @@ export function TerminalPanel({ boardId, send }: TerminalPanelProps) {
             }`}
           />
           <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-zinc-500">
-            pi
+            {runtime}
           </span>
           <span className="text-xs font-mono text-zinc-400 truncate">
             {selectedNodeId.slice(0, 8)}
@@ -156,7 +161,7 @@ export function TerminalPanel({ boardId, send }: TerminalPanelProps) {
                 ? "bg-amber-500/10 border-amber-500/20 text-amber-400/80 animate-pulse cursor-not-allowed"
                 : "bg-white/5 border-white/10 text-zinc-300 hover:bg-white/10"
             }`}
-            title={restarting ? "Restarting pi…" : "Restart the pi session"}
+            title={restarting ? `Restarting ${runtime}…` : `Restart the ${runtime} session`}
           >
             <RotateCw size={11} strokeWidth={2} className={restarting ? "animate-spin" : ""} />
             Restart

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { ChatLine, NodeStatus, SystemPrompt, WorkflowGraph } from "../types";
+import type { ChatLine, NodeRuntime, NodeStatus, SystemPrompt, WorkflowGraph } from "../types";
 
 function nodeKey(boardId: string, nodeId: string): string {
   return `${boardId}:${nodeId}`;
@@ -19,8 +19,11 @@ interface RuntimeState {
   overlayNodeId: string | null;
   prompts: SystemPrompt[];
   runPromptDraft: string;
+  /** Whether the backend can spawn Hermes (`hermes` on PATH). null until known. */
+  hermesAvailable: boolean | null;
 
   setConnected: (v: boolean) => void;
+  setHermesAvailable: (v: boolean) => void;
   setEnforcement: (boardId: string, nodeId: string, enabled: boolean) => void;
   setActiveBoardId: (boardId: string) => void;
   setSelectedNodeId: (id: string | null) => void;
@@ -48,8 +51,10 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
   overlayNodeId: null,
   prompts: [],
   runPromptDraft: "",
+  hermesAvailable: null,
 
   setConnected: (v) => set({ connected: v }),
+  setHermesAvailable: (v) => set({ hermesAvailable: v }),
   setEnforcement: (boardId, nodeId, enabled) =>
     set((s) => ({ enforcement: { ...s.enforcement, [nodeKey(boardId, nodeId)]: enabled } })),
   setActiveBoardId: (boardId) =>
@@ -151,6 +156,8 @@ export function graphFromFlow(
       promptId: string;
       promptOverride?: string;
       canBeFinal?: boolean;
+      runtime?: NodeRuntime;
+      runtimeConfig?: Record<string, unknown>;
     };
   }>,
   edges: Array<{ id: string; source: string; target: string }>,
@@ -170,6 +177,8 @@ export function graphFromFlow(
       promptId: n.data.promptId,
       promptOverride: n.data.promptOverride ?? null,
       canBeFinal: n.data.canBeFinal ?? null,
+      runtime: n.data.runtime ?? undefined,
+      runtimeConfig: n.data.runtimeConfig ?? undefined,
       position: n.position,
     })),
     edges: edges.map((e) => ({

@@ -1,5 +1,8 @@
 export type NodeStatus = "idle" | "running" | "done" | "error";
 
+/** Which agent runtime backs a node's PTY. Absent === "pi" (backward compat). */
+export type NodeRuntime = "pi" | "hermes";
+
 export interface SystemPrompt {
   id: string;
   name: string;
@@ -13,6 +16,10 @@ export interface WorkflowNodeData extends Record<string, unknown> {
   status: NodeStatus;
   promptOverride?: string;
   isEntry?: boolean;
+  /** Which agent runtime backs this node. Undefined === "pi" (default). */
+  runtime?: NodeRuntime;
+  /** Non-secret runtime parameters (model, toolset, flags). */
+  runtimeConfig?: Record<string, unknown>;
   /** Whether this node is allowed to end the chain. Undefined === true (can end).
    * When false, the agent is told it MUST hand off to a connected node. */
   canBeFinal?: boolean;
@@ -38,6 +45,8 @@ export interface WorkflowGraph {
     promptId: string;
     promptOverride?: string | null;
     canBeFinal?: boolean | null;
+    runtime?: NodeRuntime;
+    runtimeConfig?: Record<string, unknown>;
     position: { x: number; y: number };
   }>;
   edges: Array<{

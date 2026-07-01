@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { BoardManager } from "../orchestra/BoardManager.js";
 import { ptyHub } from "../pty/PtyHub.js";
-import type { WorkflowEdge, WorkflowGraph, WorkflowNode } from "../types.js";
+import type { NodeRuntime, WorkflowEdge, WorkflowGraph, WorkflowNode } from "../types.js";
 
 export function createOrchestraRoutes(boardManager: BoardManager) {
   return async function orchestraRoutes(app: FastifyInstance): Promise<void> {
@@ -167,10 +167,13 @@ export function createOrchestraRoutes(boardManager: BoardManager) {
         promptId: string;
         promptOverride?: string | null;
         canBeFinal?: boolean | null;
+        runtime?: NodeRuntime;
+        runtimeConfig?: Record<string, unknown>;
         position: { x: number; y: number };
       };
     }>("/boards/:boardId/nodes", async (req, reply) => {
-      const { id, label, promptId, promptOverride, canBeFinal, position } = req.body;
+      const { id, label, promptId, promptOverride, canBeFinal, runtime, runtimeConfig, position } =
+        req.body;
       if (!label || typeof label !== "string") {
         return reply.code(400).send({ error: "label is required" });
       }
@@ -187,6 +190,8 @@ export function createOrchestraRoutes(boardManager: BoardManager) {
           promptId,
           promptOverride: promptOverride ?? null,
           canBeFinal: canBeFinal ?? null,
+          ...(runtime !== undefined ? { runtime } : {}),
+          ...(runtimeConfig !== undefined ? { runtimeConfig } : {}),
           position,
         });
         return { ok: true, node };
@@ -204,6 +209,8 @@ export function createOrchestraRoutes(boardManager: BoardManager) {
         promptId: string;
         promptOverride: string | null;
         canBeFinal: boolean;
+        runtime: NodeRuntime;
+        runtimeConfig: Record<string, unknown>;
         position: { x: number; y: number };
       }>;
     }>("/boards/:boardId/nodes/:nodeId", async (req, reply) => {

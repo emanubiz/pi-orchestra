@@ -9,6 +9,8 @@
  *   server/
  *     backend/dist/**            compiled backend (ESM)
  *     backend/pi-extensions/**   @@HANDOFF/@@CARD parser (pi --extension, .ts)
+ *     backend/hermes-plugins/**  orchestra plugin (Python) auto-installed into
+ *                                ~/.hermes/plugins by installHermesPlugin.ts
  *     backend/package.json       trimmed: type=module + prod deps (no pi)
  *     backend/node_modules/**    production dependency closure incl. native
  *                                (node-pty, better-sqlite3) — `pi` is NOT bundled
@@ -225,6 +227,10 @@ fs.rmSync(serverDir, { recursive: true, force: true });
 
 copyDir(backendDist, path.join(serverDir, "backend", "dist"));
 copyDir(path.join(repoRoot, "backend", "pi-extensions"), path.join(serverDir, "backend", "pi-extensions"));
+// The Hermes orchestra plugin (Python): installHermesPlugin.ts copies it from
+// here into ~/.hermes/plugins/orchestra so the app is self-sufficient for
+// Hermes handoffs without a manual setup step.
+copyDir(path.join(repoRoot, "backend", "hermes-plugins"), path.join(serverDir, "backend", "hermes-plugins"));
 copyDir(frontendDist, path.join(serverDir, "frontend", "dist"));
 copyDir(path.join(repoRoot, "prompts"), path.join(serverDir, "prompts"));
 
