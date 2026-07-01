@@ -108,6 +108,7 @@ When `PINODES_ORCHESTRA_TOKEN` is set, browser clients must provide it. The VS C
 | [docs/PROGRAMMATIC_API.md](./docs/PROGRAMMATIC_API.md) | REST/CLI API for programmatic orchestration (boards, flows, auth) |
 | [docs/MULTI_INSTANCE.md](./docs/MULTI_INSTANCE.md) | Why one backend is shared today, and the path to per-workspace isolation |
 | [docs/EXPANSION_MOBILE_AND_PHYSICAL.md](./docs/EXPANSION_MOBILE_AND_PHYSICAL.md) | Visione espansione: Mobile Companion + Physical Runtime (perché, cosa, come) |
+| [docs/TEST_COVERAGE.md](./docs/TEST_COVERAGE.md) | Test coverage gap review — what's covered, what was added, what's still missing |
 
 ## Built-in Prompt Library
 

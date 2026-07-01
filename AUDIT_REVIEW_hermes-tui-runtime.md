@@ -4,8 +4,9 @@
 > **Aggiornato:** 2026-07-01 (merge in `feat/multi-runtime`, commit `eb7d17d`)
 > **Aggiornato di nuovo:** 2026-07-01 — 6/7 issue risolte (toolset override, timeout HTTP + logging, watchdog estratto in `PtyHub.handleTurnEnded` + test reali)
 > **Chiuso:** 2026-07-01 — 7/7. #6 documentata in README.md ("Hermes runtime nodes")
+> **Copertura test estesa:** 2026-07-01 — code-coverage review su questo branch: +61 test sui gap residui (persistenza `system_prompts`/`workflows`, risoluzione del comando `pi`/shim Windows, store frontend `kanban`/`board`, hook `useOrchestraWs`). Dettagli in `docs/TEST_COVERAGE.md`.
 > **Scopo:** Rendere PtyHub runtime-agnostic, aggiungendo il supporto a `hermes --tui` come alternativa a `pi` per i nodi della orchestra.
-> **Verifica pipeline:** Typecheck backend/frontend/extension ✅ · 225 test (172 backend + 39 frontend + 14 extension) ✅ · Build ✅
+> **Verifica pipeline:** Typecheck backend/frontend/extension ✅ · 286 test (194 backend + 78 frontend + 14 extension) ✅ · Build ✅
 
 ---
 
@@ -147,4 +148,4 @@ Non è un difetto — è il comportamento corretto e verificato dell'hook Hermes
 
 ## Verdetto
 
-Il refactor architetturale è di alta qualità — TDD metodologico, backward compat perfetta, pattern Strategy pulito, ring-buffer O(1). Tutte e 7 le issue emerse dall'audit sono chiuse: 6 con fix di codice (runtimeConfig ora letto e validato, timeout HTTP nel plugin, watchdog estratto in `PtyHub` e testato per davvero, dead code, shadowing) e 1 (#6) con un chiarimento in doc, perché non era un difetto ma un comportamento Hermes verificato e atteso. Nessuna issue nota aperta. Pipeline verde (225 test, tsc ×3, build) — **pronto per merge e test manuale**.
+Il refactor architetturale è di alta qualità — TDD metodologico, backward compat perfetta, pattern Strategy pulito, ring-buffer O(1). Tutte e 7 le issue emerse dall'audit sono chiuse: 6 con fix di codice (runtimeConfig ora letto e validato, timeout HTTP nel plugin, watchdog estratto in `PtyHub` e testato per davvero, dead code, shadowing) e 1 (#6) con un chiarimento in doc, perché non era un difetto ma un comportamento Hermes verificato e atteso. Nessuna issue nota aperta. Pipeline verde (286 test, tsc ×3, build) — **pronto per merge e test manuale**.
