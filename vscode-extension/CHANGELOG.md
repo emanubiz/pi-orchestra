@@ -2,6 +2,65 @@
 
 All notable changes to the **PiNodes Orchestra** extension are documented here.
 
+## 0.2.19
+
+### Changed
+
+- **One handoff standard across runtimes.** Hermes nodes now use the **same**
+  `@@HANDOFF … @@END` / `@@CARD` / `@@DONE` text protocol as pi instead of a
+  bespoke `orchestra_handoff`/`orchestra_card` tool. The Hermes orchestra plugin
+  parses the sentinels out of each turn's output in a `transform_llm_output`
+  hook (and strips them from what's shown), so there's a single orchestration
+  model to reason about and handoffs no longer depend on the model's
+  tool-calling behaving. The `orchestra` toolset is gone from the `hermes chat -t`
+  line. This fixes Hermes handoffs silently failing (the tool was being invoked
+  with Hermes' `(args_dict, **kwargs)` dispatch convention, which the named-param
+  handler couldn't accept — `missing required argument: 'message'`).
+
+### Added
+
+- **Self-sufficient Hermes plugin install.** The orchestra plugin ships inside
+  the extension and is copied into `~/.hermes/plugins/orchestra/` and enabled
+  (`hermes plugins enable orchestra`) automatically on first Hermes spawn — no
+  manual `setup-hermes-plugin.sh`. The app now depends only on the Hermes binary.
+
+### Fixed
+
+- **Hermes nodes no longer fail with "Session not found".** `HermesRuntime` was
+  spawning `hermes chat --tui … --resume <boardId-nodeId>`, but `--resume` only
+  resumes a session that already exists — on first launch the synthetic id was
+  unknown, so Hermes errored out, never reached ready, and injected tasks piled
+  up in the queue (the turn looked "stuck"/busy). It now starts a **fresh**
+  session per spawn; node identity is carried by the `PINODES_ORCHESTRA_BOARD` /
+  `PINODES_ORCHESTRA_NODE` env vars the plugin reads, so nothing is lost.
+- **Hermes toolset defaults use Hermes' own vocabulary.** The default was pi's
+  `read,bash,edit,write,grep`, which Hermes rejects ("Unknown toolsets"), leaving
+  agents without tools. Hermes now defaults to `file,terminal` (`hermes tools
+  list` names); pi keeps `read,bash,edit,write,grep`.
+- **Hermes orchestration hooks now actually load.** `setup-hermes-plugin.sh` only
+  symlinked the plugin, but Hermes ≥0.17 does not load `~/.hermes/plugins/*`
+  unless it is in `config.yaml`'s opt-in `plugins.enabled` list — so the
+  lifecycle hooks (ready / per-turn context / handoff watchdog) silently never
+  fired. The setup script now also runs `hermes plugins enable orchestra`, and
+  the plugin manifest declares `kind` + `provides_hooks`.
+
+### Added
+
+- Bundled backend includes **multi-runtime** support: Hermes TUI nodes (`runtime:
+  "hermes"`), **auto-detected** when the `hermes` CLI is on the backend PATH
+  (`PINODES_ORCHESTRA_HERMES=false`/`true` overrides the auto-detection).
+- `/api/info`, `/api/health` and the WebSocket `connected` message expose
+  `runtimes.hermes` so the UI can warn when Hermes is selected but not available
+  on the backend PATH.
+- **Add-agent flow:** **+ Add agent** (toolbar or empty canvas) opens a prompt picker
+  (search, read-only preview, custom prompts). Runtime (**pi** / **hermes**) is chosen
+  before spawn and locked afterward; read-only badge on node cards.
+
+### Changed
+
+- Documentation reorganized under `docs/` (guides, roadmaps, plans, archive, reviews).
+  See [docs/README.md](../docs/README.md).
+
 ## 0.2.18
 
 ### Added

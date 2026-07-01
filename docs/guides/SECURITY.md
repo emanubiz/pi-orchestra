@@ -149,7 +149,8 @@ rather than open security holes — the browser→RCE vector is already closed.
 - **Deterministic graph sync.** The frontend uses a few magic `setTimeout`s
   before injecting a task; a `graph_synced` ack from the backend would remove
   the residual races on slow machines / large boards.
-- **WS handler tests.** `ws/handler.ts` is critical protocol code with no direct
-  tests; regressions there are currently caught only end-to-end.
-- **CI gate.** Only the publish-on-tag workflow exists; there is no test +
-  typecheck + build gate on PRs.
+- **CI gate.** Only the publish-on-tag workflow (`publish-extension.yml`) exists;
+  there is no test + typecheck + build gate on PRs.
+
+> Resolved since this doc was first written: `ws/handler.ts` now has direct unit
+> coverage (`backend/src/ws/handler.test.ts`).

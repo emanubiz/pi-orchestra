@@ -3,7 +3,7 @@ import { Play } from "lucide-react";
 import type { Node } from "@xyflow/react";
 import { useRuntimeStore } from "../stores/runtimeStore";
 import type { SystemPrompt, WorkflowNodeData } from "../types";
-import { RuntimeSelector } from "./RuntimeSelector";
+import { RuntimeBadge } from "./RuntimeBadge";
 
 interface NodeInspectorProps {
   boardId: string;
@@ -27,7 +27,6 @@ export function NodeInspector({
     selectedNodeId ? s.nodeStatus[`${boardId}:${selectedNodeId}`] : undefined,
   );
   const prompts = useRuntimeStore((s) => s.prompts);
-  const hermesAvailable = useRuntimeStore((s) => s.hermesAvailable);
   const runPromptDraft = useRuntimeStore((s) => s.runPromptDraft);
   const setRunPromptDraft = useRuntimeStore((s) => s.setRunPromptDraft);
 
@@ -78,20 +77,10 @@ export function NodeInspector({
         </button>
       </div>
 
-      <div className="space-y-1">
+      <div className="flex items-center gap-2">
         <span className="text-[10px] text-zinc-500">Runtime</span>
-        <RuntimeSelector
-          value={node.data.runtime ?? "pi"}
-          hermesAvailable={hermesAvailable}
-          onChange={(runtime) => onUpdateNode(selectedNodeId, { runtime })}
-        />
-        {(node.data.runtime ?? "pi") === "hermes" && hermesAvailable === false && (
-          <p className="text-[10px] leading-snug text-amber-400/90">
-            Hermes is selected but the backend flag is off — set{" "}
-            <code className="font-mono text-amber-300/90">PINODES_ORCHESTRA_HERMES=true</code>{" "}
-            and restart the server. Until then this node runs as pi.
-          </p>
-        )}
+        <RuntimeBadge runtime={node.data.runtime ?? "pi"} />
+        <span className="text-[10px] text-zinc-600">(locked)</span>
       </div>
 
       <div className="flex flex-wrap gap-1">

@@ -5,7 +5,7 @@ Cursor, Windsurf, and other VS Code–compatible editors: graph canvas, live per
 terminals, and visible `@@HANDOFF` delegation — the same UI as the standalone web
 app, embedded in an editor webview.
 
-> Implements **Phase 2** of the [extensions roadmap](https://github.com/emanubiz/pinodes-orchestra/blob/main/docs/EXTENSIONS_ROADMAP.md):
+> Implements **Phase 2** of the [extensions roadmap](https://github.com/emanubiz/pinodes-orchestra/blob/main/docs/roadmaps/EXTENSIONS_ROADMAP.md):
 > a thin wrapper that spawns the bundled Fastify backend as a Node subprocess
 > and frames the built frontend. No `node-pty` / `better-sqlite3` runs in the
 > extension host.
@@ -43,7 +43,7 @@ VS Code
 - **One backend per window.** Each VS Code window spawns its **own** backend on a
   dedicated port (the first free port from `3847`) with an isolated SQLite directory
   keyed by the workspace path, so two windows never share state. See
-  [docs/MULTI_INSTANCE.md](../docs/MULTI_INSTANCE.md). (Earlier versions adopted an
+  [docs/guides/MULTI_INSTANCE.md](../docs/guides/MULTI_INSTANCE.md). (Earlier versions adopted an
   already-running backend on `3847`; that caused the second window to fail auth and
   is no longer done.)
 - **Timeline panel.** The right-side tab bar now includes a **Timeline** ("Handoff
@@ -118,7 +118,7 @@ When `pinodesOrchestra.token` is not configured, the extension generates a rando
 
 This protects against other local processes (malicious npm scripts, browser extensions with `host_permissions`) connecting to the backend while the panel is open. The extension host acts as a trusted intermediary that knows the secret and passes it to both the backend and the webview, but other processes on the machine cannot discover it.
 
-See [`docs/SECURITY.md`](../docs/SECURITY.md) for the full threat model and current controls.
+See [`docs/guides/SECURITY.md`](../docs/guides/SECURITY.md) for the full threat model and current controls.
 
 ## Documentation
 
@@ -126,9 +126,10 @@ All links are absolute so they resolve from the Open VSX / Marketplace listing t
 
 - [Project README](https://github.com/emanubiz/pinodes-orchestra#readme) — quick start, PWA, configuration
 - [ARCHITECTURE.md](https://github.com/emanubiz/pinodes-orchestra/blob/main/ARCHITECTURE.md) — system design, WS protocol, `@@HANDOFF`
-- [docs/PROGRAMMATIC_API.md](https://github.com/emanubiz/pinodes-orchestra/blob/main/docs/PROGRAMMATIC_API.md) — REST + CLI orchestration API
-- [docs/EXTENSION_PUBLISHING.md](https://github.com/emanubiz/pinodes-orchestra/blob/main/docs/EXTENSION_PUBLISHING.md) — multi-platform VSIX build & dual-registry publishing
-- [docs/EXTENSIONS_ROADMAP.md](https://github.com/emanubiz/pinodes-orchestra/blob/main/docs/EXTENSIONS_ROADMAP.md) — host integrations roadmap
+- [docs/guides/PROGRAMMATIC_API.md](https://github.com/emanubiz/pinodes-orchestra/blob/main/docs/guides/PROGRAMMATIC_API.md) — REST + CLI orchestration API
+- [docs/guides/EXTENSION_PUBLISHING.md](https://github.com/emanubiz/pinodes-orchestra/blob/main/docs/guides/EXTENSION_PUBLISHING.md) — multi-platform VSIX build & dual-registry publishing
+- [docs/roadmaps/EXTENSIONS_ROADMAP.md](https://github.com/emanubiz/pinodes-orchestra/blob/main/docs/roadmaps/EXTENSIONS_ROADMAP.md) — host integrations roadmap
+- [docs/README.md](https://github.com/emanubiz/pinodes-orchestra/blob/main/docs/README.md) — full documentation index
 
 ## Known limitations (MVP)
 

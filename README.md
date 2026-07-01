@@ -39,7 +39,7 @@ in an editor webview. It bundles a self-contained backend (native modules per
 platform) and binds the board to the open workspace folder — no repo-tab
 switcher, since the IDE already owns the cwd. Each window runs its **own**
 backend on its own port with an isolated database, so multiple windows work in
-parallel without sharing state (see [docs/MULTI_INSTANCE.md](./docs/MULTI_INSTANCE.md)).
+parallel without sharing state (see [docs/guides/MULTI_INSTANCE.md](./docs/guides/MULTI_INSTANCE.md)).
 
 **Recommended — install from Open VSX** (works out of the box in **Cursor**,
 **Windsurf**, and other VS Code–compatible editors):
@@ -63,7 +63,7 @@ code --install-extension pinodes-orchestra-vscode-*.vsix
 ```
 
 Details: [`vscode-extension/README.md`](./vscode-extension/README.md),
-[`docs/EXTENSION_PUBLISHING.md`](./docs/EXTENSION_PUBLISHING.md).
+[`docs/guides/EXTENSION_PUBLISHING.md`](./docs/guides/EXTENSION_PUBLISHING.md).
 
 ## Requirements
 
@@ -74,10 +74,11 @@ Details: [`vscode-extension/README.md`](./vscode-extension/README.md),
 ## Usage
 
 1. **Left tabs**: one board per repo folder; **+** to open another path
-2. Click a prompt in the library → adds a node to the active board (14 built-in roles available)
+2. Click **+ Add agent** (toolbar or empty canvas) → pick a prompt, optionally preview it, choose **pi** or **hermes** runtime, then confirm
 3. Drag connections between nodes (defines hand-off permissions)
-4. Select a node → interactive terminal in side panel; **Timeline** tab shows handoff/event chronology
-5. Agents hand off via `@@HANDOFF` blocks (see [ARCHITECTURE.md](./ARCHITECTURE.md))
+4. Select a node → interactive terminal in side panel; runtime badge on the card is read-only; **Timeline** tab shows handoff chronology
+5. Per-node card controls (icons on the card header): **flag** toggles `canBeFinal` (may end the chain vs. must hand off), **shield** toggles the handoff watchdog (on = must hand off or say it's done; off = free chat), **scroll** opens the per-node system-prompt override. Kanban cards advance through columns automatically as nodes change status.
+6. Agents hand off via `@@HANDOFF` blocks (see [ARCHITECTURE.md](./ARCHITECTURE.md))
 6. **Save** / **Load…** for workflows (stored with cwd + entry node)
 7. **Kanban** view: launch tasks into entry nodes
 
@@ -92,23 +93,31 @@ Details: [`vscode-extension/README.md`](./vscode-extension/README.md),
 | `PINODES_ORCHESTRA_PORT` | Override only the port in that callback URL (does **not** change the listen port — set `PORT` for that) |
 | `PINODES_ORCHESTRA_DATA_DIR` | SQLite location |
 | `PINODES_ORCHESTRA_TOKEN` | Optional shared secret for all API/internal routes and WebSocket handshakes (except `/api/health`) |
+| `PINODES_ORCHESTRA_HERMES` | *(auto)* | Optional override: `false` disables Hermes; `true` forces it on. Default: detect `hermes` on backend PATH |
 | `VITE_API_BASE` | Custom backend URL at frontend build time |
+
+Two additional variables are set automatically by hosts and rarely need manual
+tuning: `PINODES_ORCHESTRA_PARENT_PID` (backend self-exits if the given parent
+process dies — used by the IDE extension for lifecycle) and
+`PINODES_ORCHESTRA_ROOT` (override for the bundled-assets root, e.g. seed
+prompts; defaults to the repo root).
 
 When `PINODES_ORCHESTRA_TOKEN` is set, browser clients must provide it. The VS Code extension passes its `pinodesOrchestra.token` setting automatically; when no token is configured, the extension **auto-generates an ephemeral token per session** so the backend is always protected against other local processes. Standalone browser use can pass `?token=...` in the URL or store it in `localStorage` as `PINODES_ORCHESTRA_TOKEN`.
 
 ## Documentation
 
+**Full index:** [docs/README.md](./docs/README.md)
+
 | Doc | Contents |
 |-----|----------|
-| [ARCHITECTURE.md](./ARCHITECTURE.md) | Current system design, WS protocol, handoff |
-| [docs/SECURITY.md](./docs/SECURITY.md) | Threat model, current controls, configuration, known limitations |
-| [docs/EXTENSIONS_ROADMAP.md](./docs/EXTENSIONS_ROADMAP.md) | Host integrations — IDE extension (done), Hermes, OpenClaw |
-| [vscode-extension/README.md](./vscode-extension/README.md) | VS Code extension — how it works, build, settings |
-| [docs/HERMES_DESKTOP.md](./docs/HERMES_DESKTOP.md) | Hermes Desktop analysis |
-| [docs/PROGRAMMATIC_API.md](./docs/PROGRAMMATIC_API.md) | REST/CLI API for programmatic orchestration (boards, flows, auth) |
-| [docs/MULTI_INSTANCE.md](./docs/MULTI_INSTANCE.md) | Why one backend is shared today, and the path to per-workspace isolation |
-| [docs/EXPANSION_MOBILE_AND_PHYSICAL.md](./docs/EXPANSION_MOBILE_AND_PHYSICAL.md) | Visione espansione: Mobile Companion + Physical Runtime (perché, cosa, come) |
-| [docs/TEST_COVERAGE.md](./docs/TEST_COVERAGE.md) | Test coverage gap review — what's covered, what was added, what's still missing |
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | System design, runtimes, WS protocol, handoff |
+| [docs/guides/HERMES_RUNTIME.md](./docs/guides/HERMES_RUNTIME.md) | Hermes nodes — setup, UI, flags |
+| [docs/guides/SECURITY.md](./docs/guides/SECURITY.md) | Threat model, controls, configuration |
+| [docs/roadmaps/EXTENSIONS_ROADMAP.md](./docs/roadmaps/EXTENSIONS_ROADMAP.md) | Host integrations & runtime roadmap |
+| [docs/guides/PROGRAMMATIC_API.md](./docs/guides/PROGRAMMATIC_API.md) | REST/CLI API for boards, flows, auth |
+| [docs/guides/MULTI_INSTANCE.md](./docs/guides/MULTI_INSTANCE.md) | Per-window backend isolation (extension) |
+| [docs/guides/EXTENSION_PUBLISHING.md](./docs/guides/EXTENSION_PUBLISHING.md) | VSIX build & publish |
+| [docs/guides/TEST_COVERAGE.md](./docs/guides/TEST_COVERAGE.md) | Test coverage notes |
 
 ## Built-in Prompt Library
 
@@ -144,7 +153,7 @@ curl -s http://localhost:3847/api/v1/orchestra/flows \
   -d '{ "name": "auth", "cwd": "/path/to/repo", "graph": { ... }, "message": "Implement auth", "wait": true }'
 ```
 
-Details: [docs/PROGRAMMATIC_API.md](./docs/PROGRAMMATIC_API.md).
+Details: [docs/guides/PROGRAMMATIC_API.md](./docs/guides/PROGRAMMATIC_API.md).
 
 ## Host integrations
 
@@ -158,40 +167,18 @@ Standalone (browser/PWA) is the reference implementation. Hosts:
 - **OpenClaw** — Orchestra tab via Gateway HTTP route or external WS client (planned)
 
 Native `runtime: "cursor"` agent nodes (beyond pi) remain on the roadmap.
-Details: [docs/EXTENSIONS_ROADMAP.md](./docs/EXTENSIONS_ROADMAP.md).
+Details: [docs/roadmaps/EXTENSIONS_ROADMAP.md](./docs/roadmaps/EXTENSIONS_ROADMAP.md).
 
 ## Hermes runtime nodes
 
-Orchestra now supports **Hermes** agent nodes alongside pi. Each node has an
-optional `runtime` field (`"pi"` | `"hermes"`, default `"pi"`).
+See **[docs/guides/HERMES_RUNTIME.md](./docs/guides/HERMES_RUNTIME.md)** for full setup.
 
-**Feature flag:** Hermes nodes are gated behind `PINODES_ORCHESTRA_HERMES=true`.
-When off (default), `runtime: "hermes"` degrades to pi — production is unchanged.
+Summary:
 
-**Requirements for Hermes nodes:**
-- Hermes installed and on PATH (`hermes --version`)
-- The `orchestra` plugin installed in `~/.hermes/plugins/orchestra/`
-  (bundled in `backend/hermes-plugins/orchestra/` — copy or symlink it)
+- Each node: optional `runtime` (`"pi"` | `"hermes"`, default `"pi"`) — **chosen at creation**, locked afterward
+- Use **+ Add agent** → prompt picker → runtime step (pi default, hermes when flag is on)
+- Feature flag: Hermes auto-detected on backend PATH (`PINODES_ORCHESTRA_HERMES=false` to disable)
+- Requires only the Hermes CLI on PATH — the orchestra plugin ships with the app and auto-installs + enables itself into `~/.hermes/plugins/` on first Hermes spawn (no manual setup)
+- xterm renders Hermes like pi; handoff uses the **same** `@@HANDOFF` text protocol as pi (parsed by the plugin, not a native tool)
 
-**How it works:**
-- Each Hermes node runs `hermes --tui` in a PTY, just like pi.
-- System prompt is passed via `HERMES_EPHEMERAL_SYSTEM_PROMPT` env var
-  (per-process, per-node, isolated — same as `--system-prompt` for pi).
-- Orchestration hooks (handoff, context, watchdog) run via a Hermes plugin
-  instead of `--extension call-agent.ts`.
-- The xterm UI renders Hermes identically to pi — zero frontend changes needed.
-
-**Where the per-turn appendix lands differs from pi — by design, not a bug.**
-pi's extension refreshes the *system prompt* every turn (`before_agent_start`).
-Hermes has no equivalent hook for that: `pre_llm_call` instead returns
-`{"context": "<appendix>"}`, which Hermes appends to that turn's **user
-message**, not the system prompt — confirmed against Hermes source
-(`agent/turn_context.py`). Functionally equivalent (the model sees the
-recipients/finality/kanban context every turn, never persisted into history),
-but if you inspect a Hermes session's raw messages, don't expect to find the
-appendix in the system prompt slot — look at the per-turn user message
-instead. See [docs/HERMES_TUI_SPIKE_RESULT.md](./docs/HERMES_TUI_SPIKE_RESULT.md)
-(§3, "Sistema plugin/hook") for the verified hook contract.
-
-**Details:** [docs/HERMES_TUI_IMPLEMENTATION_PLAN.md](./docs/HERMES_TUI_IMPLEMENTATION_PLAN.md),
-[docs/HERMES_TUI_SPIKE_RESULT.md](./docs/HERMES_TUI_SPIKE_RESULT.md).
+Per-turn orchestration context lands in the **user message** on Hermes (not the system prompt slot) — by design. Details in the guide and [docs/archive/HERMES_TUI_SPIKE_RESULT.md](./docs/archive/HERMES_TUI_SPIKE_RESULT.md).

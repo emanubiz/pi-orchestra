@@ -56,7 +56,7 @@ describe("NodeTerminal", () => {
   it("does not send attach_node while WebSocket is offline", () => {
     const send = vi.fn();
     render(
-      <TerminalContext.Provider value={{ boardId: "b1", send, onExpand: vi.fn(), onDelete: vi.fn(), onEditPrompt: vi.fn(), onToggleFinal: vi.fn(), onSetRuntime: vi.fn() }}>
+      <TerminalContext.Provider value={{ boardId: "b1", send, onExpand: vi.fn(), onDelete: vi.fn(), onEditPrompt: vi.fn(), onToggleFinal: vi.fn() }}>
         <NodeTerminal nodeId="n1" />
       </TerminalContext.Provider>
     );
@@ -68,7 +68,7 @@ describe("NodeTerminal", () => {
   it("sends attach_node once WebSocket becomes connected", () => {
     const send = vi.fn();
     render(
-      <TerminalContext.Provider value={{ boardId: "b1", send, onExpand: vi.fn(), onDelete: vi.fn(), onEditPrompt: vi.fn(), onToggleFinal: vi.fn(), onSetRuntime: vi.fn() }}>
+      <TerminalContext.Provider value={{ boardId: "b1", send, onExpand: vi.fn(), onDelete: vi.fn(), onEditPrompt: vi.fn(), onToggleFinal: vi.fn() }}>
         <NodeTerminal nodeId="n1" />
       </TerminalContext.Provider>
     );

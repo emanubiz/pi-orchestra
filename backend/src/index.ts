@@ -16,6 +16,7 @@ import {
   updatePrompt,
 } from "./db/index.js";
 import { ptyHub } from "./pty/PtyHub.js";
+import { isHermesRuntimeAvailable } from "./pty/runtime/hermesAvailability.js";
 import { orchestraRoutes } from "./routes/orchestra.js";
 
 import type { WorkflowGraph } from "./types.js";
@@ -71,7 +72,7 @@ app.get("/api/health", async () => ({
   version: "0.1.0",
   port: PORT,
   runtimes: {
-    hermes: process.env.PINODES_ORCHESTRA_HERMES === "true",
+    hermes: isHermesRuntimeAvailable(),
   },
 }));
 
@@ -84,16 +85,22 @@ app.get("/api/info", async () => ({
   defaultCwd: process.cwd(),
   wsPath: "/ws",
   runtimes: {
-    hermes: process.env.PINODES_ORCHESTRA_HERMES === "true",
+    hermes: isHermesRuntimeAvailable(),
   },
 }));
 
 // Called by the call_agent extension running inside a node's pi terminal.
 app.post<{
-  Body: { boardId: string; fromNodeId: string; targetNodeId: string; message: string };
+  Body: {
+    boardId: string;
+    fromNodeId: string;
+    targetNodeId: string;
+    message: string;
+    taskId?: string;
+  };
 }>("/internal/call-agent", async (req) => {
-  const { boardId, fromNodeId, targetNodeId, message } = req.body;
-  return ptyHub.deliverCall(boardId, fromNodeId, targetNodeId, message);
+  const { boardId, fromNodeId, targetNodeId, message, taskId } = req.body;
+  return ptyHub.deliverCall(boardId, fromNodeId, targetNodeId, message, taskId);
 });
 
 // Called by the extension when an agent advances the linked Kanban card.

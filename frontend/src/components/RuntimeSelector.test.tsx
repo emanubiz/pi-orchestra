@@ -19,7 +19,7 @@ describe("RuntimeSelector", () => {
       <RuntimeSelector value="hermes" hermesAvailable={false} onChange={vi.fn()} />,
     );
 
-    expect(screen.getByTitle(/PINODES_ORCHESTRA_HERMES is off/i)).toBeTruthy();
+    expect(screen.getByTitle(/Hermes CLI was not found/i)).toBeTruthy();
     expect(screen.getByText("⚠")).toBeTruthy();
   });
 });

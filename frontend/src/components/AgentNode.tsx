@@ -3,7 +3,7 @@ import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { Flag, FlagOff, Maximize2, RefreshCw, ScrollText, ShieldCheck, ShieldOff, Trash2 } from "lucide-react";
 import type { WorkflowNodeData, NodeStatus } from "../types";
 import { NodeTerminal } from "./NodeTerminal";
-import { RuntimeSelector } from "./RuntimeSelector";
+import { RuntimeBadge } from "./RuntimeBadge";
 import { useTerminalBridge } from "../lib/termTheme";
 import { confirmPiRestart, usePiRestartState } from "../hooks/usePiRestartState";
 import { useRuntimeStore } from "../stores/runtimeStore";
@@ -26,14 +26,13 @@ const statusBar: Record<NodeStatus, string> = {
 
 function AgentNodeComponent({ id, data, selected }: NodeProps & { data: WorkflowNodeData }) {
   const status = data.status ?? "idle";
-  const { onExpand, onDelete, onEditPrompt, onToggleFinal, onSetRuntime, boardId, send } = useTerminalBridge();
+  const { onExpand, onDelete, onEditPrompt, onToggleFinal, boardId, send } = useTerminalBridge();
   const [restarting, setRestarting] = usePiRestartState(boardId, id);
   // Undefined === can end (preserves old graphs); only an explicit false forces a hand-off.
   const canBeFinal = data.canBeFinal !== false;
   // Determinism watchdog for this node (default on; toggled live for free chat).
   const enforce = useRuntimeStore((s) => s.enforcement[`${boardId}:${id}`] ?? true);
   const setEnforcement = useRuntimeStore((s) => s.setEnforcement);
-  const hermesAvailable = useRuntimeStore((s) => s.hermesAvailable);
   const runtime = data.runtime ?? "pi";
 
   // Selection wins the bar; then live status; an entry node gets a soft amber rest state.
@@ -141,12 +140,7 @@ function AgentNodeComponent({ id, data, selected }: NodeProps & { data: Workflow
         >
           <Maximize2 size={12} strokeWidth={2} />
         </button>
-        <RuntimeSelector
-          variant="compact"
-          value={runtime}
-          hermesAvailable={hermesAvailable}
-          onChange={(next) => onSetRuntime(id, next)}
-        />
+        <RuntimeBadge runtime={runtime} compact />
         <button
           type="button"
           className={`nodrag shrink-0 rounded p-0.5 transition-colors ${

@@ -1,9 +1,15 @@
 name: orchestra
 version: "1.0.0"
+kind: standalone
 description: >
   Orchestra integration for Hermes — agent-to-agent handoff, Kanban tracking,
   and determinism watchdog. Auto-disabled when PINODES_ORCHESTRA_NODE is absent.
 author: pinodes-orchestra
+provides_hooks:
+  - on_session_start
+  - pre_llm_call
+  - transform_llm_output
+  - post_llm_call
 requires_env:
   - PINODES_ORCHESTRA_NODE
   - PINODES_ORCHESTRA_URL

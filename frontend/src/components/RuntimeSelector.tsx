@@ -32,7 +32,7 @@ export function RuntimeSelector({
       className={`flex items-center gap-1 ${className}`}
       title={
         hermesWarn
-          ? "Hermes selected but PINODES_ORCHESTRA_HERMES is off on the backend — node will run as pi until enabled"
+          ? "Hermes selected but the Hermes CLI was not found on the backend PATH — node will run as pi"
           : "Agent runtime for this node"
       }
     >
@@ -68,7 +68,7 @@ export function RuntimeSelector({
               } ${compact ? "min-w-[1.6rem]" : "flex-1"}`}
               title={
                 opt.value === "hermes" && hermesAvailable === false
-                  ? "Hermes requires PINODES_ORCHESTRA_HERMES=true on the backend"
+                  ? "Hermes CLI not found on the backend PATH (install Hermes or restart the IDE from a shell that has it)"
                   : `${opt.label} runtime`
               }
             >

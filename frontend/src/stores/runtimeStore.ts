@@ -19,7 +19,7 @@ interface RuntimeState {
   overlayNodeId: string | null;
   prompts: SystemPrompt[];
   runPromptDraft: string;
-  /** Whether the backend has PINODES_ORCHESTRA_HERMES=true. null until known. */
+  /** Whether the backend can spawn Hermes (`hermes` on PATH). null until known. */
   hermesAvailable: boolean | null;
 
   setConnected: (v: boolean) => void;

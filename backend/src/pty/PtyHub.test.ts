@@ -20,12 +20,33 @@ const spawnCalls = vi.hoisted(
 );
 const ptyInstances = vi.hoisted(() => [] as FakePty[]);
 
+// HermesRuntime.spawn triggers the plugin auto-install (which shells out to
+// `hermes plugins enable`) — stub it so PtyHub unit tests stay hermetic.
+vi.mock("./runtime/installHermesPlugin.js", () => ({
+  ensureHermesPluginInstalled: vi.fn(),
+}));
+
 vi.mock("node-pty", () => ({
   default: {
     spawn: (file: string, args: string[], opts: Record<string, unknown>) => {
+      const resumeIdx = args.indexOf("--resume");
       const sidIdx = args.indexOf("--session-id");
+      // Hermes no longer passes --resume/--session-id (a synthetic id would fail
+      // with "Session not found"); its node identity lives in the env vars the
+      // plugin reads, so fall back to those to map the spawn back to a node.
+      const env = (opts?.env ?? {}) as Record<string, string>;
+      const envSid =
+        env.PINODES_ORCHESTRA_BOARD && env.PINODES_ORCHESTRA_NODE
+          ? `${env.PINODES_ORCHESTRA_BOARD}-${env.PINODES_ORCHESTRA_NODE}`
+          : "";
+      const sessionId =
+        resumeIdx >= 0
+          ? args[resumeIdx + 1]
+          : sidIdx >= 0
+            ? args[sidIdx + 1]
+            : envSid;
       const inst: FakePty = {
-        sessionId: sidIdx >= 0 ? args[sidIdx + 1] : "",
+        sessionId: sessionId ?? "",
         writes: [],
         _exit: null,
         _data: null,
@@ -132,7 +153,12 @@ function argValue(call: { args: string[] }, flag: string): string | undefined {
 
 function lastSpawnFor(nodeId: string) {
   const sid = `${BOARD}-${nodeId}`;
-  return [...spawnCalls].reverse().find((c) => c.args.includes(sid));
+  return [...spawnCalls].reverse().find((c) => {
+    if (c.args.includes(sid)) return true;
+    // Hermes carries node identity in env vars, not in a session-id arg.
+    const env = (c.opts?.env ?? {}) as Record<string, string>;
+    return env.PINODES_ORCHESTRA_BOARD === BOARD && env.PINODES_ORCHESTRA_NODE === nodeId;
+  });
 }
 
 describe("PtyHub", () => {
@@ -174,6 +200,63 @@ describe("PtyHub", () => {
     expect(hub.orchestraContext(BOARD, "n2")?.enforce).toBe(true); // sibling unaffected
     expect(hub.isEnforced(BOARD, "n1")).toBe(false);
     expect(hub.enforcementOverrides(BOARD)).toEqual([{ nodeId: "n1", enabled: false }]);
+  });
+
+  // ── unified appendix (pi + hermes share ONE @@HANDOFF text protocol) ─────────
+
+  it.each(["pi", "hermes"] as const)(
+    "connectionsAppendix for %s non-final nodes instructs @@HANDOFF text blocks, never a tool",
+    (runtime) => {
+      hub.setGraph(BOARD, graphOf({ edges: true, n1Runtime: runtime, n1Final: false }), "/tmp");
+      const ctx = hub.orchestraContext(BOARD, "n1");
+      expect(ctx?.appendix).toContain("@@HANDOFF");
+      expect(ctx?.appendix).toContain("@@END");
+      expect(ctx?.appendix).not.toContain("orchestra_handoff");
+      // A non-terminal node is explicitly forbidden from ending the chain.
+      expect(ctx?.appendix).toContain("NOT a terminal node");
+      expect(ctx?.appendix).toContain("Do not use @@DONE");
+    },
+  );
+
+  it("connectionsAppendix is byte-for-byte identical for pi and hermes", () => {
+    hub.setGraph(BOARD, graphOf({ edges: true, n1Runtime: "pi", n1Final: true }), "/tmp");
+    const pi = hub.orchestraContext(BOARD, "n1")?.appendix;
+    hub.setGraph(BOARD, graphOf({ edges: true, n1Runtime: "hermes", n1Final: true }), "/tmp");
+    const hermes = hub.orchestraContext(BOARD, "n1")?.appendix;
+    expect(hermes).toBe(pi);
+    expect(pi).toContain("@@DONE"); // final-capable node may close the chain
+  });
+
+  it.each(["pi", "hermes"] as const)(
+    "kanbanAppendix for %s nodes instructs @@CARD text, never a tool",
+    (runtime) => {
+      hub.setKanbanTracked(BOARD);
+      hub.setGraph(BOARD, graphOf({ edges: true, n1Runtime: runtime }), "/tmp");
+      const ctx = hub.orchestraContext(BOARD, "n1");
+      expect(ctx?.appendix).toContain("@@CARD");
+      expect(ctx?.appendix).not.toContain("orchestra_card");
+    },
+  );
+
+  it("deliverCall error nudge always instructs @@HANDOFF, never a tool (any runtime)", () => {
+    vi.useFakeTimers();
+    // n1 is a hermes node — it must still be nudged with the text protocol.
+    const graph: WorkflowGraph = {
+      ...graphWithDuplicateDevelopers(),
+      nodes: graphWithDuplicateDevelopers().nodes.map((n) =>
+        n.id === "n1" ? { ...n, runtime: "hermes" as NodeRuntime } : n,
+      ),
+    };
+    hub.setGraph(BOARD, graph, "/tmp");
+    hub.ensure(BOARD, "n1", 80, 24);
+    hub.markReady(BOARD, "n1");
+    const sender = ptyFor("n1")!;
+
+    hub.deliverCall(BOARD, "n1", "developer", "ambiguous");
+
+    const writes = sender.writes.join("");
+    expect(writes).toContain("Re-issue the @@HANDOFF");
+    expect(writes).not.toContain("orchestra_handoff");
   });
 
   // ── spawn: role-only prompt + fallback env ───────────────────────────────────
@@ -534,8 +617,9 @@ describe("PtyHub", () => {
 
       const call = lastSpawnFor("n1")!;
       expect(call).toBeDefined();
+      expect(call.args[0]).toBe("chat");
       expect(call.args).toContain("--tui");
-      expect(call.args).toContain("--toolsets");
+      expect(call.args).toContain("-t");
       expect(call.args).not.toContain("--system-prompt");
       expect(call.args).not.toContain("--extension");
       const env = call.opts.env as Record<string, string>;

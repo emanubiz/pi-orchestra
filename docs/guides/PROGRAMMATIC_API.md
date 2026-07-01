@@ -27,10 +27,10 @@ Listen port is set by `PORT` (default 3847). `PINODES_ORCHESTRA_URL` overrides t
 
 ```http
 GET /api/health
-→ { ok, name, version, port }
+→ { ok, name, version, port, runtimes: { hermes } }
 
 GET /api/info
-→ { ok, name, version, port, defaultCwd, wsPath }
+→ { ok, name, version, port, defaultCwd, wsPath, runtimes: { hermes } }
 ```
 
 > Both endpoints are stable and used by host integrations (VSCode, Hermes, OpenClaw) for readiness checks.
@@ -261,7 +261,7 @@ curl -s http://localhost:3847/api/v1/orchestra/flows \
 Standalone localhost deployments can run with no auth (default). The **VS Code
 extension auto-generates an ephemeral token per session** even when none is
 configured — see [`vscode-extension/src/sessionToken.ts`](../vscode-extension/src/sessionToken.ts)
-and [`docs/SECURITY.md`](./SECURITY.md).
+and [`SECURITY.md`](./SECURITY.md).
 
 For remote embeds or programmatic consumers, set the environment variable:
 
@@ -292,7 +292,8 @@ code `4002` on the handshake.
 The `pinodes-orchestra` CLI wraps the REST API for scripting and CI.
 
 **Installation & Setup**
-Run via npm: `npm run cli -- <command>`
+Run from the backend workspace (the `cli` script lives in `backend/package.json`,
+not the repo root): `npm run cli -w backend -- <command>` (or `cd backend && npm run cli -- <command>`).
 Env vars: `PINODES_ORCHESTRA_URL` (default `http://localhost:3847`), `PINODES_ORCHESTRA_TOKEN`.
 
 **Available Commands:**
@@ -362,14 +363,20 @@ ws.onopen = () => {
 ## Planned — node runtime field
 
 Implemented: `runtime?: "pi" | "hermes"` and `runtimeConfig?: Record<string, unknown>`.
-Hermes is gated behind `PINODES_ORCHESTRA_HERMES=true` (off by default).
+Hermes is available when the `hermes` CLI is on the backend PATH (see
+[HERMES_RUNTIME.md](./guides/HERMES_RUNTIME.md)). Optional `PINODES_ORCHESTRA_HERMES=false`
+disables it; `true` forces it on.
+
+In the **web UI**, runtime is set when creating a node (`POST` equivalent via the add-agent
+flow) and is not editable afterward. The REST API still accepts `runtime` on `PATCH` for
+programmatic updates (restarting the PTY is the caller's responsibility).
 
 `runtimeConfig` fields recognized by the runtimes (unrecognized fields are
 silently ignored, so the shape can grow without a migration):
 
 | Field | Type | Effect | Runtimes |
 |---|---|---|---|
-| `toolset` | `string` | Overrides the default tool list (`read,bash,edit,write,grep`) passed as `--tools`/`--toolsets`. Ignored if blank or not a string — falls back to the default. | pi, hermes |
+| `toolset` | `string` | Overrides the default tool list passed as `--tools`/`-t`. **Runtime-specific vocabularies:** pi uses `read,bash,edit,write,grep` (default); Hermes uses its own toolset names (`file,terminal,web,…` — see `hermes tools list`, default `file,terminal`). Ignored if blank or not a string — falls back to that runtime's default. | pi, hermes |
 
 ```typescript
 interface WorkflowNode {

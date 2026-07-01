@@ -280,4 +280,4 @@ For the record. Do not re-propose without a new reason.
 
 - [`SECURITY.md`](./SECURITY.md) — token, CORS, allowed origins (unchanged by this work).
 - [`PROGRAMMATIC_API.md`](./PROGRAMMATIC_API.md) — REST/WS surface, already multi-port compatible.
-- [`EXTENSIONS_ROADMAP.md`](./EXTENSIONS_ROADMAP.md) — host integrations, extension MVP status.
+- [`EXTENSIONS_ROADMAP.md`](../roadmaps/EXTENSIONS_ROADMAP.md) — host integrations, extension MVP status.

@@ -6,7 +6,7 @@
 > existing `/internal/*` contract — no new backend endpoints.
 >
 > Companion docs: [`ARCHITECTURE.md`](../ARCHITECTURE.md) (runtime model),
-> [`HERMES_TUI_IMPLEMENTATION_PLAN.md`](./HERMES_TUI_IMPLEMENTATION_PLAN.md)
+> [`HERMES_TUI_IMPLEMENTATION_PLAN.md`](./HERMES_TUI_IMPLEMENTATION_PLAN.md) (✅ completed)
 > (the pattern this mirrors), [`MULTI_INSTANCE.md`](./MULTI_INSTANCE.md)
 > (per-window isolation, unaffected by this work).
 

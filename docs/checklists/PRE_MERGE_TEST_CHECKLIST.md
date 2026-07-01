@@ -71,37 +71,42 @@ This tests that the ring buffer (256 KB cap) works correctly under heavy output.
 
 ---
 
-## 3. Runtime Selector in UI — 2 min
+## 3. Add-agent flow & runtime — 3 min
 
-1. Open the board editor.
-2. Click on a node card → edit settings.
-3. Look for the **Runtime** dropdown (should show "pi" and "hermes").
+1. Open the board editor (empty or with nodes).
+2. Click **+ Add agent** (Agents toolbar or empty-canvas button).
 
 | Check | Expected | ✅/❌ |
 |-------|----------|------|
-| Dropdown visible | Shows "pi" (default) and "hermes" |  |
-| Select hermes | Node saves with `runtime: "hermes"` |  |
-| Select pi | Node saves with `runtime: "pi"` |  |
+| Modal opens | Prompt list with search |  |
+| View (eye) | Read-only preview; **no node spawned** |  |
+| Custom prompt | Can create and continue to runtime step |  |
+| Runtime step | pi default; hermes available when flag on |  |
+| Create node | Node appears with correct prompt + runtime badge |  |
+| Runtime locked | No pi/hm toggle on card or Inspector (badge only) |  |
 | Graph persistence | After reload, runtime choice is preserved |  |
+| Flag warning | If Hermes selected but flag off, warning in runtime step |  |
 
-> Note: the hermes runtime won't actually spawn unless step 4 is configured.
+> Note: Hermes won't actually spawn unless step 4 is configured.
 
 ---
 
 ## 4. Hermes Runtime Path — 3 min
 
-### 4a. Plugin Setup
+### 4a. Plugin Auto-Install
+
+No manual setup — the plugin installs itself on first Hermes spawn. Just ensure
+the Hermes CLI is on PATH and the runtime is enabled:
 
 ```bash
-bash scripts/setup-hermes-plugin.sh
 export PINODES_ORCHESTRA_HERMES=true
 ```
 
 | Check | Expected | ✅/❌ |
 |-------|----------|------|
-| Symlink created | `~/.hermes/plugins/orchestra → backend/hermes-plugins/orchestra/` |  |
-| Idempotent | Running again says "already correct" |  |
-| Flag printed | Script prints `PINODES_ORCHESTRA_HERMES=true` |  |
+| Auto-copied | After first hermes spawn, `~/.hermes/plugins/orchestra/` exists (or is a dev symlink) |  |
+| Auto-enabled | `hermes plugins list` shows `orchestra` **enabled** |  |
+| Idempotent | Spawning more hermes nodes doesn't re-copy or error |  |
 
 ### 4b. Runtime Test
 
@@ -113,8 +118,8 @@ export PINODES_ORCHESTRA_HERMES=true
 |-------|----------|------|
 | Hermes spawns | Terminal shows hermes TUI (`hermes --tui`) |  |
 | Plugin loads | No "plugin not found" errors in hermes output |  |
-| Tool available | Agent has `orchestra_handoff` tool |  |
-| Handoff works | Can hand off to a connected pi node |  |
+| Handoff works | Hermes node emits `@@HANDOFF … @@END`; delivered to a connected pi **or** hermes node |  |
+| Handoff both ways | pi→hermes and hermes→pi both deliver (same text protocol) |  |
 
 > If `hermes` is not installed, the node should exit gracefully (not crash the backend).
 
@@ -138,7 +143,7 @@ export PINODES_ORCHESTRA_HERMES=true
 | Smoke test | ⬜ |
 | Pi regression | ⬜ |
 | Ring-buffer scrollback | ⬜ |
-| Runtime selector UI | ⬜ |
+| Add-agent flow (prompt + runtime) | ⬜ |
 | Hermes path | ⬜ |
 | Edge cases | ⬜ |
 

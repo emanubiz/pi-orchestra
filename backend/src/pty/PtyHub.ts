@@ -4,6 +4,7 @@ import type { NodeStatus, WorkflowEdge, WorkflowGraph, WorkflowNode } from "../t
 import { resolveCwd } from "../utils/paths.js";
 import type { INodeRuntime } from "./runtime/INodeRuntime.js";
 import { HermesRuntime } from "./runtime/HermesRuntime.js";
+import { isHermesRuntimeAvailable } from "./runtime/hermesAvailability.js";
 import { PiRuntime } from "./runtime/PiRuntime.js";
 
 const MAX_BUFFER = 256_000; // scrollback kept per node for re-attach
@@ -160,7 +161,8 @@ export class PtyHub {
     const kanban = this.kanbanBoards.has(boardId);
     return {
       appendix:
-        this.connectionsAppendix(boardId, nodeId) + (kanban ? this.kanbanAppendix() : ""),
+        this.connectionsAppendix(boardId, nodeId) +
+        (kanban ? this.kanbanAppendix() : ""),
       canBeFinal: this.canBeFinal(boardId, nodeId),
       outgoing,
       kanban,
@@ -220,9 +222,17 @@ export class PtyHub {
     return this.graphs.get(boardId)?.nodes.get(nodeId)?.canBeFinal !== false;
   }
 
-  /** System-prompt appendix telling an agent which nodes it may hand off to. */
+  /** System-prompt appendix telling an agent which nodes it may hand off to.
+   *  Runtime-agnostic: pi and Hermes share ONE text-sentinel protocol
+   *  (`@@HANDOFF`/`@@END`, `@@DONE`). pi parses it in its extension, Hermes in
+   *  the orchestra plugin's `transform_llm_output` hook — same instructions, same
+   *  delivery endpoint, so there's a single orchestration standard to reason
+   *  about (and nothing that can break on a per-runtime tool-call convention). */
   private connectionsAppendix(boardId: string, nodeId: string): string {
     const targets = this.outgoingTargets(boardId, nodeId);
+    const handles = this.handles(boardId);
+    const lines = targets.map((t) => `- ${handles.get(t.id)} — ${t.label}`).join("\n");
+
     if (targets.length === 0) {
       return (
         "\n\n## Orchestration\n" +
@@ -230,8 +240,7 @@ export class PtyHub {
         "When the task is finished, end your turn with `@@DONE` on its own line.\n"
       );
     }
-    const handles = this.handles(boardId);
-    const lines = targets.map((t) => `- ${handles.get(t.id)} — ${t.label}`).join("\n");
+
     // A non-final node must always pass the ball downstream; a final-capable one
     // may close the chain when its part truly finishes the task.
     const endingRule = this.canBeFinal(boardId, nodeId)
@@ -243,6 +252,17 @@ export class PtyHub {
         "done you are REQUIRED to hand off to one of the connected agents below — always close " +
         "your message with a @@HANDOFF block. Do not use @@DONE (it is not permitted for you). " +
         "(This rule can be lifted later at runtime.)\n";
+
+    const handoffInstruction =
+      "To delegate, end your message with a hand-off block in EXACTLY this " +
+      "format (no backticks, no text after @@END):\n\n" +
+      "@@HANDOFF:<recipient-handle>\n" +
+      "<complete, self-contained instructions: what you produced, files touched, what they must do>\n" +
+      "@@END\n\n" +
+      "The system delivers each hand-off automatically into the recipient's terminal.\n";
+
+    const doneExample = "if everything is fine, closes the chain with `@@DONE`.";
+
     return (
       "\n\n## Orchestration — you are one link in a pipeline of agents\n" +
       "CORE RULE: this runs as a pipeline — do your part, then hand the next step to the " +
@@ -256,19 +276,16 @@ export class PtyHub {
       lines +
       "\n\nIf the same role appears more than once (e.g. developer-1, developer-2) pick the " +
       "specific handle you want; they are separate agents working in parallel.\n\n" +
-      "To delegate, end your message with a hand-off block in EXACTLY this " +
-      "format (no backticks, no text after @@END):\n\n" +
-      "@@HANDOFF:<recipient-handle>\n" +
-      "<complete, self-contained instructions: what you produced, files touched, what they must do>\n" +
-      "@@END\n\n" +
-      "Example: an architect produces the plan/spec and hands it to the developer — it does NOT " +
+      handoffInstruction +
+      "\nExample: an architect produces the plan/spec and hands it to the developer — it does NOT " +
       "implement; the developer implements and hands off to QA/the auditor; the auditor reviews and, " +
-      "if everything is fine, closes the chain with `@@DONE`. The system delivers each hand-off " +
-      "automatically into the recipient's terminal.\n"
+      doneExample + "\n"
     );
   }
 
-  /** Appendix telling agents to advance the linked Kanban card by real state. */
+  /** Appendix telling agents to advance the linked Kanban card by real state.
+   *  Runtime-agnostic: pi and Hermes both emit a `@@CARD:<column>` text line
+   *  (parsed by the pi extension / the Hermes orchestra plugin respectively). */
   private kanbanAppendix(): string {
     return (
       "\n\n## Kanban — advancing the card\n" +
@@ -343,8 +360,7 @@ export class PtyHub {
       this.connectionsAppendix(boardId, nodeId) +
       (this.kanbanBoards.has(boardId) ? this.kanbanAppendix() : "");
 
-    // Feature flag evaluated at spawn time (not module load) so tests can toggle it.
-    const hermesEnabled = process.env.PINODES_ORCHESTRA_HERMES === "true";
+    const hermesEnabled = isHermesRuntimeAvailable();
     const runtime: INodeRuntime =
       node?.runtime === "hermes" && hermesEnabled
         ? new HermesRuntime()
@@ -459,6 +475,7 @@ export class PtyHub {
     fromNodeId: string,
     targetNodeId: string,
     message: string,
+    taskId?: string,
   ): { ok: boolean; message?: string; error?: string } {
     const target = this.resolveOutgoingTarget(boardId, fromNodeId, targetNodeId);
     if (!target) {
@@ -493,6 +510,7 @@ export class PtyHub {
       boardId,
       fromNodeId,
       toNodeId: target.id,
+      ...(taskId && { taskId }),
     });
 
     // The sender just handed off successfully, so clear any stale "handoff
@@ -517,10 +535,10 @@ export class PtyHub {
 
   /**
    * Hermes `post_llm_call` bridge (`POST /internal/turn-ended`): the agent
-   * finished a turn. If it's a non-final node that didn't call
-   * orchestra_handoff, nudge it — up to MAX_TURN_ENDED_RETRIES — before
-   * reporting the node as errored. The Hermes equivalent of pi's
-   * explicit-intent watchdog (which runs client-side in the pi extension).
+   * finished a turn. If it's a non-final node that didn't emit a @@HANDOFF
+   * block, nudge it — up to MAX_TURN_ENDED_RETRIES — before reporting the node
+   * as errored. The Hermes equivalent of pi's explicit-intent watchdog (which
+   * runs client-side in the pi extension).
    */
   handleTurnEnded(
     boardId: string,
@@ -546,7 +564,7 @@ export class PtyHub {
         status: "error",
         message:
           `Handoff not completed after ${MAX_TURN_ENDED_RETRIES} retries. ` +
-          `Expected the agent to call orchestra_handoff or end with DONE.`,
+          `Expected the agent to emit a @@HANDOFF block delegating to a downstream agent.`,
       });
       return { ok: true, retries, exceeded: true };
     }
@@ -554,8 +572,8 @@ export class PtyHub {
     this.injectTask(
       boardId,
       nodeId,
-      `[orchestra] You must hand off or end your turn. ` +
-        `Use the orchestra_handoff tool to delegate to one of: ${targets}. ` +
+      `[orchestra] You must hand off to a downstream agent. ` +
+        `Close your message with a @@HANDOFF block to one of these recipients: ${targets}. ` +
         `(Attempt ${retries}/${MAX_TURN_ENDED_RETRIES})`,
     );
     return { ok: true, retries };

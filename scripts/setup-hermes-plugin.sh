@@ -23,6 +23,27 @@ if [[ "${1:-}" == "--dry-run" ]]; then
   echo "[setup] DRY RUN — no changes will be made"
 fi
 
+# Enable the plugin in Hermes' opt-in allow-list (config.yaml `plugins.enabled`).
+# Hermes ≥0.17 does NOT load ~/.hermes/plugins/* unless explicitly enabled, so
+# the symlink alone is not enough — without this the orchestra hooks
+# (on_session_start → ready, pre_llm_call → context, post_llm_call → watchdog)
+# never fire and handoffs silently do nothing.
+enable_plugin() {
+  if ! command -v hermes >/dev/null 2>&1; then
+    echo "⚠️  hermes not on PATH — skipped enabling. Run later: hermes plugins enable orchestra"
+    return
+  fi
+  if $DRY_RUN; then
+    echo "[setup] Would run: hermes plugins enable orchestra"
+    return
+  fi
+  if hermes plugins enable orchestra >/dev/null 2>&1; then
+    echo "✅ Enabled orchestra in Hermes (config.yaml plugins.enabled)"
+  else
+    echo "⚠️  Could not auto-enable — run manually: hermes plugins enable orchestra"
+  fi
+}
+
 # ── Pre-flight checks ───────────────────────────────────────────────────────
 
 if [[ ! -d "$PLUGIN_SRC" ]]; then
@@ -58,9 +79,10 @@ if [[ -L "$PLUGIN_TARGET" ]]; then
   EXISTING_TARGET="$(readlink -f "$PLUGIN_TARGET")"
   if [[ "$EXISTING_TARGET" == "$(readlink -f "$PLUGIN_SRC")" ]]; then
     echo "✅ Symlink already correct: $PLUGIN_TARGET → $PLUGIN_SRC"
+    enable_plugin
     echo ""
     echo "── Next step ─────────────────────────────────────────────────"
-    echo "  export PINODES_ORCHESTRA_HERMES=true"
+    echo "  Ensure \`hermes\` is on PATH (orchestra auto-detects it)."
     echo "──────────────────────────────────────────────────────────────"
     exit 0
   else
@@ -85,11 +107,13 @@ else
   fi
 fi
 
-# ── Output ──────────────────────────────────────────────────────────────────
+# ── Enable + output ─────────────────────────────────────────────────────────
+
+enable_plugin
 
 echo ""
 echo "── Next step ─────────────────────────────────────────────────"
-echo "  export PINODES_ORCHESTRA_HERMES=true"
+echo "  Ensure \`hermes\` is on PATH — Orchestra auto-detects it."
 echo ""
 echo "  Add to your shell rc (~/.bashrc, ~/.zshrc) or run inline."
 echo "  This flag tells the backend to use HermesRuntime for nodes"

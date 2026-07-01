@@ -1,8 +1,9 @@
 import pty from "node-pty";
 import { findInPath } from "./findInPath.js";
+import { ensureHermesPluginInstalled } from "./installHermesPlugin.js";
 import type { RuntimeSpawnConfig } from "./INodeRuntime.js";
 import { PtyRuntime } from "./PtyRuntime.js";
-import { resolveToolset } from "./resolveToolset.js";
+import { HERMES_DEFAULT_TOOLSET, resolveToolset } from "./resolveToolset.js";
 
 /** Resolve the `hermes` binary on PATH. */
 function resolveHermesCommand(): string {
@@ -16,25 +17,46 @@ function resolveHermesCommand(): string {
 }
 
 /**
- * Hermes TUI runtime — spawns `hermes --tui` in a PTY.
+ * Hermes TUI runtime — spawns `hermes chat --tui` in a PTY.
  *
  * Differs from PiRuntime in:
  *  - Uses `HERMES_EPHEMERAL_SYSTEM_PROMPT` env var (per-process, per-node) instead of `--system-prompt`.
- *  - No `--extension` flag; orchestration hooks run via a plugin in `~/.hermes/plugins/orchestra/`.
- *  - `--toolsets` instead of `--tools`.
+ *  - No `--extension` flag; orchestration runs via the orchestra plugin in
+ *    `~/.hermes/plugins/orchestra/` (auto-installed by ensureHermesPluginInstalled).
+ *  - `-t` / `--toolsets` on the `chat` subcommand (Hermes ≥0.17) carries only the
+ *    node's work toolset (file,terminal by default). Handoffs are a TEXT protocol
+ *    (`@@HANDOFF`, parsed by the plugin's transform_llm_output hook), NOT a tool —
+ *    so there's no `orchestra` toolset to enable and nothing that breaks if the
+ *    model's tool-calling misfires.
  */
 export class HermesRuntime extends PtyRuntime {
   private cmd = resolveHermesCommand();
 
   spawn(config: RuntimeSpawnConfig): void {
+    // Self-sufficiency: ship + enable the orchestra plugin in the user's Hermes
+    // (idempotent, once per process) so handoffs work with no manual setup.
+    ensureHermesPluginInstalled(this.cmd);
+
+    // No `--resume`: each spawn starts a FRESH Hermes session. `--resume <id>`
+    // only resumes a session that already exists, so passing a synthetic
+    // board-node id on the first launch fails with "Session not found" and the
+    // node never reaches ready — leaving injected tasks stuck in the queue.
+    // Orchestration identity is carried by PINODES_ORCHESTRA_BOARD/NODE env
+    // vars (read by the plugin), not by the Hermes session id, so a fresh
+    // session per spawn matches pi's behaviour and loses nothing.
+    //
+    // `-t` carries only the node's WORK toolset (file,terminal by default, or a
+    // user-supplied runtimeConfig.toolset). Orchestration is not a tool: the
+    // plugin parses @@HANDOFF/@@CARD text out of the turn output, so there is no
+    // `orchestra` toolset to enable and no dependency on Hermes tool-calling.
+    const toolsets = resolveToolset(config.runtimeConfig, HERMES_DEFAULT_TOOLSET);
     const args = [
+      "chat",
       "--tui",
-      "--toolsets",
-      resolveToolset(config.runtimeConfig),
-      "--session-id",
-      `${config.boardId}-${config.nodeId}`.replace(/[^a-zA-Z0-9-]/g, ""),
-      "--name",
-      config.label || "hermes",
+      "-t",
+      toolsets,
+      "--source",
+      "tool",
     ];
 
     console.log("pinodes-orchestra: spawning hermes", this.cmd, args);

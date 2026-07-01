@@ -5,7 +5,7 @@ import { AgentNode } from "./AgentNode";
 import { TerminalContext } from "../lib/termTheme";
 import { useRuntimeStore } from "../stores/runtimeStore";
 import { emitNodeReady } from "../lib/ptyBus";
-import type { NodeStatus } from "../types";
+import type { NodeStatus, WorkflowNodeData } from "../types";
 
 // Mock @xyflow/react Handle so it doesn't require ReactFlowProvider
 vi.mock("@xyflow/react", () => ({
@@ -73,7 +73,6 @@ const terminalCtx = {
   onDelete: vi.fn(),
   onEditPrompt: vi.fn(),
   onToggleFinal: vi.fn(),
-  onSetRuntime: vi.fn(),
 };
 
 describe("AgentNode — refresh button", () => {
@@ -250,13 +249,13 @@ describe("AgentNode — refresh button", () => {
   });
 });
 
-describe("AgentNode — runtime selector", () => {
+describe("AgentNode — runtime badge", () => {
   beforeEach(() => {
     resetStore();
     vi.clearAllMocks();
   });
 
-  function renderNode(data: typeof baseData = baseData) {
+  function renderNode(data: WorkflowNodeData = baseData) {
     return render(
       <TerminalContext.Provider value={terminalCtx}>
         <AgentNode
@@ -279,10 +278,9 @@ describe("AgentNode — runtime selector", () => {
     );
   }
 
-  it("renders pi/hermes toggle and calls onSetRuntime on change", () => {
-    renderNode();
-    const hermesBtn = screen.getByRole("button", { name: "hm" });
-    act(() => { hermesBtn.click(); });
-    expect(terminalCtx.onSetRuntime).toHaveBeenCalledWith("n1", "hermes");
+  it("shows read-only runtime badge (no toggle)", () => {
+    renderNode({ ...baseData, runtime: "hermes" });
+    expect(screen.getByText("hm")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "pi" })).toBeNull();
   });
 });

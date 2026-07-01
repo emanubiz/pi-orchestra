@@ -56,10 +56,9 @@ Windows-aware (handles `.cmd`/`.bat` npm shims on PATH).
 
 ### HermesRuntime (`backend/src/pty/runtime/HermesRuntime.ts`)
 
-Spawns `hermes --tui` with `--toolsets`. Uses `HERMES_EPHEMERAL_SYSTEM_PROMPT`
+Spawns `hermes chat --tui` with `-t` / toolsets. Uses `HERMES_EPHEMERAL_SYSTEM_PROMPT`
 env var for per-node system prompt isolation. Orchestration hooks run via a
-plugin in `~/.hermes/plugins/orchestra/`. Gated behind
-`PINODES_ORCHESTRA_HERMES=true` (off by default).
+plugin in `~/.hermes/plugins/orchestra/`. Used when `hermes` is on the backend PATH (auto-detected).
 
 ### BoardManager (`backend/src/orchestra/BoardManager.ts`)
 
@@ -83,24 +82,29 @@ interface WorkflowNode {
 ```
 
 PtyHub selects the runtime at spawn time:
-- `runtime: "hermes"` + `PINODES_ORCHESTRA_HERMES=true` → HermesRuntime
+- `runtime: "hermes"` + `hermes` on backend PATH → HermesRuntime
 - Otherwise → PiRuntime (default)
 
 ## Handoff protocol
 
 Agents communicate through a structured handoff. The *delivery* path is identical
 across runtimes (`POST /internal/call-agent` → `PtyHub.deliverCall` → inject into
-the target PTY → broadcast a `handoff` WebSocket event for the timeline); only how
-the agent **expresses** the handoff differs by runtime:
+the target PTY → broadcast a `handoff` WebSocket event for the timeline). All
+runtimes express the handoff with **one shared text protocol** — a
+`@@HANDOFF:<recipient-handle> … @@END` block (and `@@CARD`, `@@DONE`) — so there
+is a single orchestration standard, not a per-runtime split. Only *where the
+text is parsed* differs:
 
-| Runtime | How the agent expresses a handoff |
+| Runtime | Where the `@@HANDOFF` block is parsed |
 |---|---|
-| **pi** | Emits a `@@HANDOFF:<recipient-handle> … @@END` text block; the `call-agent.ts` extension parses it on `agent_end` and POSTs. Works on any provider, no tool support required. |
-| **Hermes** | Calls the **native** `orchestra_handoff(recipient, message)` tool (registered by the plugin) — function-calling, no text parsing. |
-| **Claude Code** *(planned)* | Calls the **native** `orchestra_handoff` MCP tool — same as Hermes. See [docs/CLAUDE_CODE_RUNTIME_PLAN.md](./docs/CLAUDE_CODE_RUNTIME_PLAN.md). |
+| **pi** | The `call-agent.ts` extension parses `agent_end` output and POSTs. Works on any provider, no tool support required. |
+| **Hermes** | The orchestra plugin's `transform_llm_output` hook parses the turn's output and POSTs — same protocol as pi, no bespoke tool. |
+| **Claude Code** *(planned)* | Same text protocol, parsed by its runtime shim. See [docs/plans/CLAUDE_CODE_RUNTIME_PLAN.md](./docs/plans/CLAUDE_CODE_RUNTIME_PLAN.md). |
 
-The backend contract (`/internal/call-agent`, recipient resolution, the `handoff`
-event) is the same regardless of which expression the runtime uses.
+A text protocol (rather than a native tool) is deliberate: it is provider- and
+runtime-agnostic and can't break on a tool-schema/dispatch mismatch. The backend
+contract (`/internal/call-agent`, recipient resolution, the `handoff` event) is
+identical regardless of runtime.
 
 ## Determinism watchdog
 
@@ -133,7 +137,7 @@ then reports the node as errored.
 
 ## Security
 
-See [docs/SECURITY.md](./docs/SECURITY.md) for the full threat model and controls.
+See [docs/guides/SECURITY.md](./docs/guides/SECURITY.md) for the full threat model and controls.
 
 Key points:
 - Backend binds `127.0.0.1` by default
@@ -145,5 +149,5 @@ Key points:
 
 | Flag | Default | Effect |
 |------|---------|--------|
-| `PINODES_ORCHESTRA_HERMES` | `false` | Enable HermesRuntime for `runtime: "hermes"` nodes |
+| `PINODES_ORCHESTRA_HERMES` | auto | Optional override for Hermes: default detects CLI on PATH; `false` off; `true` force on |
 | `PINODES_ORCHESTRA_ENFORCE` | `true` | Default determinism watchdog state (can be toggled per-node) |

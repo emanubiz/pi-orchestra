@@ -49,6 +49,12 @@ vi.mock("node-pty", () => ({
   },
 }));
 
+// The plugin auto-install shells out to `hermes plugins enable` — stub it so the
+// unit test never touches the real filesystem/CLI.
+vi.mock("./installHermesPlugin.js", () => ({
+  ensureHermesPluginInstalled: vi.fn(),
+}));
+
 // Make findInPath succeed so the command resolves.
 vi.mock("node:fs", () => ({
   default: {
@@ -108,37 +114,35 @@ describe("HermesRuntime", () => {
 
   // ── spawn ──────────────────────────────────────────────────────────────────
 
-  it("spawns hermes with --tui and the correct arguments", () => {
+  it("spawns hermes chat --tui with Hermes-native toolsets and no --resume", () => {
     const rt = new HermesRuntime();
     rt.spawn(spawnConfig());
 
     const spawnCall = lastSpawn()!;
     expect(spawnCall).toBeDefined();
-    // --tui flag
+    expect(spawnCall.args[0]).toBe("chat");
     expect(spawnCall.args).toContain("--tui");
-    // toolset flag
-    const tsIdx = spawnCall.args.indexOf("--toolsets");
+    const tsIdx = spawnCall.args.indexOf("-t");
     expect(tsIdx).toBeGreaterThanOrEqual(0);
-    expect(spawnCall.args[tsIdx + 1]).toBe("read,bash,edit,write,grep");
-    // session-id (sanitised)
-    const sidIdx = spawnCall.args.indexOf("--session-id");
-    expect(sidIdx).toBeGreaterThanOrEqual(0);
-    expect(spawnCall.args[sidIdx + 1]).toBe("b1-n1");
-    // name
-    const nameIdx = spawnCall.args.indexOf("--name");
-    expect(nameIdx).toBeGreaterThanOrEqual(0);
-    expect(spawnCall.args[nameIdx + 1]).toBe("Developer");
-    // Hermes does NOT use --system-prompt or --extension
+    // Only the node's work toolset — handoffs are a text protocol (@@HANDOFF)
+    // parsed by the plugin, not a tool, so there is no `orchestra` toolset.
+    expect(spawnCall.args[tsIdx + 1]).toBe("file,terminal");
+    expect(spawnCall.args[tsIdx + 1]).not.toContain("orchestra");
+    // A synthetic session id never exists on first launch, so --resume must NOT
+    // be passed (it would fail with "Session not found" and never reach ready).
+    expect(spawnCall.args).not.toContain("--resume");
+    expect(spawnCall.args).toContain("--source");
     expect(spawnCall.args).not.toContain("--system-prompt");
     expect(spawnCall.args).not.toContain("--extension");
   });
 
-  it("uses runtimeConfig.toolset to override the default --toolsets list", () => {
+  it("uses runtimeConfig.toolset to override the default toolset list", () => {
     const rt = new HermesRuntime();
     rt.spawn(spawnConfig({ runtimeConfig: { toolset: "read,grep" } }));
 
     const spawnCall = lastSpawn()!;
-    const tsIdx = spawnCall.args.indexOf("--toolsets");
+    const tsIdx = spawnCall.args.indexOf("-t");
+    // User override is passed through verbatim — nothing is appended.
     expect(spawnCall.args[tsIdx + 1]).toBe("read,grep");
   });
 
@@ -146,14 +150,14 @@ describe("HermesRuntime", () => {
     const rt = new HermesRuntime();
     rt.spawn(spawnConfig({ runtimeConfig: { toolset: "" } }));
     let spawnCall = lastSpawn()!;
-    let tsIdx = spawnCall.args.indexOf("--toolsets");
-    expect(spawnCall.args[tsIdx + 1]).toBe("read,bash,edit,write,grep");
+    let tsIdx = spawnCall.args.indexOf("-t");
+    expect(spawnCall.args[tsIdx + 1]).toBe("file,terminal");
 
     const rt2 = new HermesRuntime();
     rt2.spawn(spawnConfig({ runtimeConfig: { toolset: ["read"] } }));
     spawnCall = lastSpawn()!;
-    tsIdx = spawnCall.args.indexOf("--toolsets");
-    expect(spawnCall.args[tsIdx + 1]).toBe("read,bash,edit,write,grep");
+    tsIdx = spawnCall.args.indexOf("-t");
+    expect(spawnCall.args[tsIdx + 1]).toBe("file,terminal");
   });
 
   it("sets the expected env vars including HERMES_EPHEMERAL_SYSTEM_PROMPT", () => {

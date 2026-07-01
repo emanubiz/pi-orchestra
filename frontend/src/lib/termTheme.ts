@@ -1,5 +1,4 @@
 import { createContext, useContext } from "react";
-import type { NodeRuntime } from "../types";
 
 export const TERM_THEME = {
   // Transparent so the terminal inherits its themed container background
@@ -25,8 +24,6 @@ export interface TerminalBridge {
   onEditPrompt: (nodeId: string) => void;
   /** Flip whether a node is allowed to end the chain. */
   onToggleFinal: (nodeId: string) => void;
-  /** Switch the agent runtime backing this node's PTY. */
-  onSetRuntime: (nodeId: string, runtime: NodeRuntime) => void;
 }
 
 export const TerminalContext = createContext<TerminalBridge | null>(null);
