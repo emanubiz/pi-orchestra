@@ -16,6 +16,9 @@ const READY_SETTLE_MS = 250;
 const READY_FALLBACK_MS = 10_000;
 // Default for the determinism watchdog when a board has no explicit override.
 const ENFORCE_DEFAULT = process.env.PINODES_ORCHESTRA_ENFORCE !== "false";
+// Nudge retries for the Hermes turn-ended watchdog before a non-final node
+// that won't hand off is reported as an error (see handleTurnEnded).
+const MAX_TURN_ENDED_RETRIES = 3;
 const PORT = Number(
   process.env.PINODES_ORCHESTRA_PORT ?? process.env.PORT ?? 3847,
 );
@@ -58,6 +61,8 @@ export class PtyHub {
   // Toggled live so the user can chat freely with one node without being asked
   // "handoff or done?", while the rest of the board stays enforced.
   private enforceOverride = new Map<string, boolean>();
+  // Per-node retry counter for the Hermes turn-ended watchdog (handleTurnEnded).
+  private turnEndedRetries = new Map<string, number>();
   private events = new EventEmitter();
 
   setBroadcast(fn: BroadcastFn): void {
@@ -508,6 +513,52 @@ export class PtyHub {
    */
   injectTask(boardId: string, nodeId: string, message: string): void {
     this.scheduleInject(boardId, nodeId, message);
+  }
+
+  /**
+   * Hermes `post_llm_call` bridge (`POST /internal/turn-ended`): the agent
+   * finished a turn. If it's a non-final node that didn't call
+   * orchestra_handoff, nudge it — up to MAX_TURN_ENDED_RETRIES — before
+   * reporting the node as errored. The Hermes equivalent of pi's
+   * explicit-intent watchdog (which runs client-side in the pi extension).
+   */
+  handleTurnEnded(
+    boardId: string,
+    nodeId: string,
+    handoffCalledThisTurn: boolean,
+  ): { ok: true; retries?: number; exceeded?: boolean } {
+    const ctx = this.orchestraContext(boardId, nodeId);
+    if (!ctx || ctx.canBeFinal) return { ok: true };
+    const k = key(boardId, nodeId);
+    if (handoffCalledThisTurn) {
+      this.turnEndedRetries.delete(k);
+      return { ok: true };
+    }
+
+    const retries = (this.turnEndedRetries.get(k) ?? 0) + 1;
+    this.turnEndedRetries.set(k, retries);
+    if (retries > MAX_TURN_ENDED_RETRIES) {
+      this.turnEndedRetries.delete(k);
+      this.notify({
+        type: "node_status",
+        boardId,
+        nodeId,
+        status: "error",
+        message:
+          `Handoff not completed after ${MAX_TURN_ENDED_RETRIES} retries. ` +
+          `Expected the agent to call orchestra_handoff or end with DONE.`,
+      });
+      return { ok: true, retries, exceeded: true };
+    }
+    const targets = ctx.outgoing.map((t) => t.handle).join(", ");
+    this.injectTask(
+      boardId,
+      nodeId,
+      `[orchestra] You must hand off or end your turn. ` +
+        `Use the orchestra_handoff tool to delegate to one of: ${targets}. ` +
+        `(Attempt ${retries}/${MAX_TURN_ENDED_RETRIES})`,
+    );
+    return { ok: true, retries };
   }
 
   /**

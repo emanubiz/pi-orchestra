@@ -108,6 +108,7 @@ When `PINODES_ORCHESTRA_TOKEN` is set, browser clients must provide it. The VS C
 | [docs/PROGRAMMATIC_API.md](./docs/PROGRAMMATIC_API.md) | REST/CLI API for programmatic orchestration (boards, flows, auth) |
 | [docs/MULTI_INSTANCE.md](./docs/MULTI_INSTANCE.md) | Why one backend is shared today, and the path to per-workspace isolation |
 | [docs/EXPANSION_MOBILE_AND_PHYSICAL.md](./docs/EXPANSION_MOBILE_AND_PHYSICAL.md) | Visione espansione: Mobile Companion + Physical Runtime (perché, cosa, come) |
+| [docs/TEST_COVERAGE.md](./docs/TEST_COVERAGE.md) | Test coverage gap review — what's covered, what was added, what's still missing |
 
 ## Built-in Prompt Library
 
@@ -179,6 +180,18 @@ When off (default), `runtime: "hermes"` degrades to pi — production is unchang
 - Orchestration hooks (handoff, context, watchdog) run via a Hermes plugin
   instead of `--extension call-agent.ts`.
 - The xterm UI renders Hermes identically to pi — zero frontend changes needed.
+
+**Where the per-turn appendix lands differs from pi — by design, not a bug.**
+pi's extension refreshes the *system prompt* every turn (`before_agent_start`).
+Hermes has no equivalent hook for that: `pre_llm_call` instead returns
+`{"context": "<appendix>"}`, which Hermes appends to that turn's **user
+message**, not the system prompt — confirmed against Hermes source
+(`agent/turn_context.py`). Functionally equivalent (the model sees the
+recipients/finality/kanban context every turn, never persisted into history),
+but if you inspect a Hermes session's raw messages, don't expect to find the
+appendix in the system prompt slot — look at the per-turn user message
+instead. See [docs/HERMES_TUI_SPIKE_RESULT.md](./docs/HERMES_TUI_SPIKE_RESULT.md)
+(§3, "Sistema plugin/hook") for the verified hook contract.
 
 **Details:** [docs/HERMES_TUI_IMPLEMENTATION_PLAN.md](./docs/HERMES_TUI_IMPLEMENTATION_PLAN.md),
 [docs/HERMES_TUI_SPIKE_RESULT.md](./docs/HERMES_TUI_SPIKE_RESULT.md).

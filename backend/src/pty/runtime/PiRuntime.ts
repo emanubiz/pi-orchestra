@@ -5,6 +5,7 @@ import pty from "node-pty";
 import { findInPath } from "./findInPath.js";
 import type { RuntimeSpawnConfig } from "./INodeRuntime.js";
 import { PtyRuntime } from "./PtyRuntime.js";
+import { resolveToolset } from "./resolveToolset.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const EXTENSION_PATH = path.resolve(__dirname, "../../../pi-extensions/call-agent.ts");
@@ -72,7 +73,7 @@ export class PiRuntime extends PtyRuntime {
     const args = [
       ...this.cmd.baseArgs,
       "--tools",
-      "read,bash,edit,write,grep",
+      resolveToolset(config.runtimeConfig),
       "--session-id",
       `${config.boardId}-${config.nodeId}`.replace(/[^a-zA-Z0-9-]/g, ""),
       "--name",

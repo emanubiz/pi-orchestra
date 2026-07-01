@@ -16,8 +16,16 @@ Tools:
 
 import os
 import json
+import logging
+import urllib.error
 import urllib.request
 from typing import Any
+
+# Every call blocks the agent's turn until it returns — cap it so a stalled
+# or unreachable orchestra backend can't hang a hermes session indefinitely.
+_HTTP_TIMEOUT_S = 5
+
+log = logging.getLogger("orchestra_plugin")
 
 
 def _env(name: str) -> str:
@@ -43,7 +51,7 @@ def _post(path: str, body: dict[str, Any]) -> dict[str, Any]:
         },
         method="POST",
     )
-    with urllib.request.urlopen(req) as resp:
+    with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT_S) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
@@ -60,7 +68,7 @@ def _get(path: str) -> dict[str, Any]:
         },
         method="GET",
     )
-    with urllib.request.urlopen(req) as resp:
+    with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT_S) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
@@ -91,9 +99,9 @@ def register(ctx: Any) -> None:
         """Mark the node as booted so queued tasks flush immediately."""
         try:
             _post("/internal/ready", {"boardId": _board, "nodeId": _node})
-        except Exception:
+        except Exception as e:
             # Don't crash the session — the backend has a fallback timeout.
-            pass
+            log.warning("orchestra: /internal/ready failed: %s", e)
 
     def pre_llm_call(**kwargs: Any) -> dict[str, Any] | None:
         """Inject the live orchestration appendix into the current turn."""
@@ -104,8 +112,8 @@ def register(ctx: Any) -> None:
             appendix = orchestra_ctx.get("appendix", "")
             if appendix:
                 return {"context": appendix}
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("orchestra: /internal/orchestra-context failed: %s", e)
         return None
 
     def post_llm_call(**kwargs: Any) -> None:
@@ -120,8 +128,8 @@ def register(ctx: Any) -> None:
                     "handoffCalledThisTurn": _handoff_called_this_turn,
                 },
             )
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("orchestra: /internal/turn-ended failed: %s", e)
         finally:
             _handoff_called_this_turn = False
 

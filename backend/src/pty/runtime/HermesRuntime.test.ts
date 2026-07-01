@@ -133,6 +133,29 @@ describe("HermesRuntime", () => {
     expect(spawnCall.args).not.toContain("--extension");
   });
 
+  it("uses runtimeConfig.toolset to override the default --toolsets list", () => {
+    const rt = new HermesRuntime();
+    rt.spawn(spawnConfig({ runtimeConfig: { toolset: "read,grep" } }));
+
+    const spawnCall = lastSpawn()!;
+    const tsIdx = spawnCall.args.indexOf("--toolsets");
+    expect(spawnCall.args[tsIdx + 1]).toBe("read,grep");
+  });
+
+  it("falls back to the default toolset when runtimeConfig.toolset is blank or the wrong type", () => {
+    const rt = new HermesRuntime();
+    rt.spawn(spawnConfig({ runtimeConfig: { toolset: "" } }));
+    let spawnCall = lastSpawn()!;
+    let tsIdx = spawnCall.args.indexOf("--toolsets");
+    expect(spawnCall.args[tsIdx + 1]).toBe("read,bash,edit,write,grep");
+
+    const rt2 = new HermesRuntime();
+    rt2.spawn(spawnConfig({ runtimeConfig: { toolset: ["read"] } }));
+    spawnCall = lastSpawn()!;
+    tsIdx = spawnCall.args.indexOf("--toolsets");
+    expect(spawnCall.args[tsIdx + 1]).toBe("read,bash,edit,write,grep");
+  });
+
   it("sets the expected env vars including HERMES_EPHEMERAL_SYSTEM_PROMPT", () => {
     const oldToken = process.env.PINODES_ORCHESTRA_TOKEN;
     process.env.PINODES_ORCHESTRA_TOKEN = "test-token";

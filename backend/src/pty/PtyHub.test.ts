@@ -617,7 +617,7 @@ describe("PtyHub", () => {
       expect(ctx?.outgoing[0].handle).toBe("developer");
     });
 
-    it("turn-ended: final node with no handoff is not nudged", () => {
+    it("handleTurnEnded: final node with no handoff is a no-op — not nudged, no PTY writes", () => {
       const broadcasts: Array<Record<string, unknown>> = [];
       hub.setBroadcast((msg) => broadcasts.push(msg));
       hub.setGraph(
@@ -626,23 +626,19 @@ describe("PtyHub", () => {
         "/tmp",
       );
       hub.ensure(BOARD, "n1", 80, 24);
+      hub.markReady(BOARD, "n1");
+      broadcasts.length = 0; // drop spawn/ready broadcasts (node_status running, pty_size, node_ready)
 
-      const ctx = hub.orchestraContext(BOARD, "n1");
-      expect(ctx?.canBeFinal).toBe(true);
+      const result = hub.handleTurnEnded(BOARD, "n1", false);
 
-      // A final node that didn't hand off is allowed to end — no nudge should fire.
-      const preWrites = (ptyFor("n1")?.writes ?? []).length;
-      // Simulate turn-ended for a final node — should be a no-op.
-      const errorBroadcastsBefore = broadcasts.filter(
-        (m) => m.type === "node_status" && m.status === "error",
-      ).length;
-      expect(errorBroadcastsBefore).toBe(0);
-      // No nudge messages should appear.
-      expect(ptyFor("n1")?.writes.length).toBe(preWrites);
+      expect(result).toEqual({ ok: true });
+      expect(ptyFor("n1")?.writes ?? []).toEqual([]);
+      expect(broadcasts).toEqual([]);
     });
 
-    it("turn-ended: non-final hermes node gets nudged after each turn without handoff", () => {
-      vi.useFakeTimers();
+    it("handleTurnEnded: non-final node is nudged with incrementing retries, then errors after the cap", () => {
+      const broadcasts: Array<Record<string, unknown>> = [];
+      hub.setBroadcast((msg) => broadcasts.push(msg));
       hub.setGraph(
         BOARD,
         graphOf({ edges: true, n1Runtime: "hermes", n1Final: false }),
@@ -652,9 +648,44 @@ describe("PtyHub", () => {
       hub.markReady(BOARD, "n1");
       const inst = ptyFor("n1")!;
 
-      // First turn-ended without handoff → inject nudge.
-      hub.injectTask(BOARD, "n1", "[orchestra] You must hand off");
-      expect(inst.writes.join("")).toContain("[orchestra] You must hand off");
+      const r1 = hub.handleTurnEnded(BOARD, "n1", false);
+      expect(r1).toEqual({ ok: true, retries: 1 });
+      expect(inst.writes.join("")).toContain("Attempt 1/3");
+      expect(inst.writes.join("")).toContain("developer"); // n2's handle, the only outgoing target
+
+      const r2 = hub.handleTurnEnded(BOARD, "n1", false);
+      expect(r2).toEqual({ ok: true, retries: 2 });
+      expect(inst.writes.join("")).toContain("Attempt 2/3");
+
+      const r3 = hub.handleTurnEnded(BOARD, "n1", false);
+      expect(r3).toEqual({ ok: true, retries: 3 });
+      expect(inst.writes.join("")).toContain("Attempt 3/3");
+
+      const writesBeforeCap = inst.writes.length;
+      const r4 = hub.handleTurnEnded(BOARD, "n1", false);
+      expect(r4).toEqual({ ok: true, retries: 4, exceeded: true });
+      // Cap exceeded → reports error instead of writing another nudge.
+      expect(inst.writes.length).toBe(writesBeforeCap);
+      expect(broadcasts).toContainEqual(
+        expect.objectContaining({
+          type: "node_status",
+          boardId: BOARD,
+          nodeId: "n1",
+          status: "error",
+        }),
+      );
+
+      // A later handoff resets the counter for the next turn.
+      const r5 = hub.handleTurnEnded(BOARD, "n1", true);
+      expect(r5).toEqual({ ok: true });
+      const r6 = hub.handleTurnEnded(BOARD, "n1", false);
+      expect(r6).toEqual({ ok: true, retries: 1 });
+    });
+
+    it("handleTurnEnded returns a no-op for an unknown board or node", () => {
+      hub.setGraph(BOARD, graphOf({ edges: true, n1Runtime: "hermes" }), "/tmp");
+      expect(hub.handleTurnEnded(BOARD, "ghost", false)).toEqual({ ok: true });
+      expect(hub.handleTurnEnded("nope", "n1", false)).toEqual({ ok: true });
     });
 
     it("Hermes not installed degrades gracefully (spawn still attempted)", () => {

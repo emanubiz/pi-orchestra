@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, afterAll, describe, expect, it, vi } from "vitest";
+import path from "node:path";
 import { PiRuntime } from "./PiRuntime.js";
 import type { RuntimeSpawnConfig } from "./INodeRuntime.js";
 
@@ -50,11 +51,22 @@ vi.mock("node-pty", () => ({
 }));
 
 // Ensure the extension file check passes so the spawn path includes --extension.
+// Configurable per-test so the resolvePiCommand() branch tests below can
+// control which candidate paths "exist" without affecting the rest of the
+// suite (default: everything exists, preserving prior behaviour).
+const existsSyncMock = vi.hoisted(() => vi.fn((_p: string) => true));
 vi.mock("node:fs", () => ({
   default: {
-    existsSync: () => true,
+    existsSync: (p: string) => existsSyncMock(p),
     statSync: () => ({ isFile: () => true }),
   },
+}));
+
+// resolvePiCommand() falls back to findInPath() when no bundled cli.js is
+// found; mocked separately so those branches don't depend on the real PATH.
+const findInPathMock = vi.hoisted(() => vi.fn<(names: string | string[]) => string | undefined>());
+vi.mock("./findInPath.js", () => ({
+  findInPath: (names: string | string[]) => findInPathMock(names),
 }));
 
 function lastSpawn(): { file: string; args: string[]; opts: Record<string, unknown> } | undefined {
@@ -104,6 +116,8 @@ describe("PiRuntime", () => {
   beforeEach(() => {
     mockSpawn.mockClear();
     fakePtys.length = 0;
+    existsSyncMock.mockReset().mockReturnValue(true);
+    findInPathMock.mockReset();
   });
 
   // ── spawn ──────────────────────────────────────────────────────────────────
@@ -132,6 +146,29 @@ describe("PiRuntime", () => {
     expect(spawnCall.args[spIdx + 1]).toBe("You are an architect.");
     // extension (fs mock says it exists)
     expect(spawnCall.args).toContain("--extension");
+  });
+
+  it("uses runtimeConfig.toolset to override the default --tools list", () => {
+    const rt = new PiRuntime();
+    rt.spawn(spawnConfig({ runtimeConfig: { toolset: "read,grep" } }));
+
+    const spawnCall = lastSpawn()!;
+    const toolsIdx = spawnCall.args.indexOf("--tools");
+    expect(spawnCall.args[toolsIdx + 1]).toBe("read,grep");
+  });
+
+  it("falls back to the default toolset when runtimeConfig.toolset is blank or the wrong type", () => {
+    const rt = new PiRuntime();
+    rt.spawn(spawnConfig({ runtimeConfig: { toolset: "   " } }));
+    let spawnCall = lastSpawn()!;
+    let toolsIdx = spawnCall.args.indexOf("--tools");
+    expect(spawnCall.args[toolsIdx + 1]).toBe("read,bash,edit,write,grep");
+
+    const rt2 = new PiRuntime();
+    rt2.spawn(spawnConfig({ runtimeConfig: { toolset: 42 } }));
+    spawnCall = lastSpawn()!;
+    toolsIdx = spawnCall.args.indexOf("--tools");
+    expect(spawnCall.args[toolsIdx + 1]).toBe("read,bash,edit,write,grep");
   });
 
   it("bakes the appendix into --system-prompt when the extension is absent", () => {
@@ -331,5 +368,100 @@ describe("PiRuntime", () => {
     // fresh PTY
     expect(lastPty()).not.toBe(first);
     // stale exit from old PTY does not affect new state (handled by PtyHub)
+  });
+});
+
+// resolvePiCommand() is private and runs once per `new PiRuntime()` (field
+// initializer), so each branch is exercised indirectly through the resulting
+// spawn() call (`this.cmd.file` / `this.cmd.baseArgs`).
+describe("PiRuntime resolvePiCommand", () => {
+  const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+  beforeEach(() => {
+    mockSpawn.mockClear();
+    fakePtys.length = 0;
+    existsSyncMock.mockReset().mockReturnValue(false);
+    findInPathMock.mockReset();
+    consoleErrorSpy.mockClear();
+  });
+
+  afterAll(() => {
+    consoleErrorSpy.mockRestore();
+  });
+
+  it("uses the bundled node_modules cli.js when it exists, without touching PATH", () => {
+    existsSyncMock.mockReturnValue(true); // both node_modules candidates "exist"
+
+    const rt = new PiRuntime();
+    rt.spawn(spawnConfig());
+
+    expect(findInPathMock).not.toHaveBeenCalled();
+    const call = lastSpawn()!;
+    expect(call.file).toBe(process.execPath); // launched via `node <cli.js>`, no shell
+    expect(call.args[0]).toMatch(/cli\.js$/);
+  });
+
+  it("falls back to a plain PATH binary when no bundled cli.js is found", () => {
+    existsSyncMock.mockReturnValue(false); // neither node_modules candidate exists
+    findInPathMock.mockReturnValue("/usr/local/bin/pi");
+
+    const rt = new PiRuntime();
+    rt.spawn(spawnConfig());
+
+    const call = lastSpawn()!;
+    expect(call.file).toBe("/usr/local/bin/pi");
+    // No baseArgs prepended for a plain binary — first arg is the first real flag.
+    expect(call.args[0]).toBe("--tools");
+  });
+
+  it("rewrites a Windows .cmd/.bat shim to its underlying cli.js and launches via node", () => {
+    existsSyncMock.mockReset();
+    const shimPath = "C:\\Users\\dev\\AppData\\Roaming\\npm\\pi.cmd";
+    const cliFromShim = path.join(
+      path.dirname(shimPath),
+      "node_modules",
+      "@earendil-works",
+      "pi-coding-agent",
+      "dist",
+      "cli.js",
+    );
+    // Only the resolved cli.js path "exists" — the two node_modules candidates
+    // (checked first) must report false so resolution falls through to PATH.
+    existsSyncMock.mockImplementation((p: string) => p === cliFromShim);
+    findInPathMock.mockReturnValue(shimPath);
+
+    const rt = new PiRuntime();
+    rt.spawn(spawnConfig());
+
+    const call = lastSpawn()!;
+    expect(call.file).toBe(process.execPath);
+    expect(call.args[0]).toBe(cliFromShim);
+  });
+
+  it("uses the shim itself when its underlying cli.js cannot be located", () => {
+    existsSyncMock.mockReturnValue(false); // node_modules candidates AND cliFromShim all absent
+    const shimPath = "C:\\Users\\dev\\AppData\\Roaming\\npm\\pi.cmd";
+    findInPathMock.mockReturnValue(shimPath);
+
+    const rt = new PiRuntime();
+    rt.spawn(spawnConfig());
+
+    const call = lastSpawn()!;
+    expect(call.file).toBe(shimPath);
+    expect(call.args[0]).toBe("--tools");
+  });
+
+  it("logs an actionable error and falls back to a bare binary name when pi is nowhere to be found", () => {
+    existsSyncMock.mockReturnValue(false);
+    findInPathMock.mockReturnValue(undefined);
+
+    const rt = new PiRuntime();
+    rt.spawn(spawnConfig());
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("pi CLI not found"));
+    const call = lastSpawn()!;
+    const expectedFallback = process.platform === "win32" ? "pi.cmd" : "pi";
+    expect(call.file).toBe(expectedFallback);
+    expect(call.args[0]).toBe("--tools");
   });
 });

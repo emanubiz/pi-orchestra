@@ -109,8 +109,10 @@ Ensures non-final nodes always hand off:
 **pi**: extension's `before_agent_start` checks if the last turn ended without
 handoff → re-prompts via `sendUserMessage` (max retries, then `handoff-failed`).
 
-**Hermes**: `post_llm_call` hook → `POST /internal/turn-ended`. If non-final and
-no handoff, the backend injects a nudge into the PTY (up to `MAX_STEER_RETRIES`).
+**Hermes**: `post_llm_call` hook → `POST /internal/turn-ended`, handled by
+`PtyHub.handleTurnEnded` (owns the per-node retry count). If non-final and no
+handoff, it injects a nudge into the PTY (up to `MAX_TURN_ENDED_RETRIES`, 3),
+then reports the node as errored.
 
 ## Data flow
 
