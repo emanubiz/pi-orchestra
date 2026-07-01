@@ -65,8 +65,8 @@ Handoff: same `@@HANDOFF` block or structured `call_agent` if Cursor exposes it.
 ### Hermes (✅ PTY runtime — `hermes --tui`)
 
 - Spawn: `hermes --tui` via `HermesRuntime` (same PTY/xterm path as pi)
-- Handoff: native `orchestra_handoff` tool (Hermes plugin)
-- Feature flag: `PINODES_ORCHESTRA_HERMES=true`
+- Handoff: **same `@@HANDOFF` text protocol as pi**, parsed by the orchestra plugin's `transform_llm_output` hook (auto-installed into `~/.hermes/plugins/`)
+- Availability: auto-detected when `hermes` is on the backend PATH (`PINODES_ORCHESTRA_HERMES=false`/`true` overrides)
 - UI: **+ Add agent** modal — prompt picker, optional preview, runtime step before spawn; read-only **pi** / **hm** badge on the card
 - Guide: [guides/HERMES_RUNTIME.md](../guides/HERMES_RUNTIME.md)
 
@@ -101,7 +101,7 @@ Handoff: same `@@HANDOFF` block or structured `call_agent` if Cursor exposes it.
 
 ### 2. VS Code–compatible IDE extension — ✅ published (MVP)
 
-Lives in [`vscode-extension/`](../vscode-extension/README.md). **One extension**
+Lives in [`vscode-extension/`](../../vscode-extension/README.md). **One extension**
 serves VS Code, **Cursor**, **Windsurf**, and other forks via
 [Open VSX](https://open-vsx.org/extension/emanubiz/pinodes-orchestra-vscode)
 (and the VS Code Marketplace).

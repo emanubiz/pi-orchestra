@@ -39,8 +39,8 @@ adapter implementing `INodeRuntime`.
 | Runtime | Status | Handoff mechanism |
 |---------|--------|-------------------|
 | **pi** (default) | ✅ Shipped | `@@HANDOFF` text block parsed by `call-agent.ts` |
-| **hermes** | ✅ Shipped (`PINODES_ORCHESTRA_HERMES`) | Native `orchestra_handoff` tool + plugin lifecycle hooks |
-| **claude** | 🔜 Planned | MCP tools + lifecycle hooks — see [CLAUDE_CODE_RUNTIME_PLAN.md](./CLAUDE_CODE_RUNTIME_PLAN.md) |
+| **hermes** | ✅ Shipped (auto-detected on PATH) | **Same** `@@HANDOFF` text block, parsed by the plugin's `transform_llm_output` hook |
+| **claude** | 🔜 Planned | Same `@@HANDOFF` text protocol + lifecycle hooks — see [CLAUDE_CODE_RUNTIME_PLAN.md](./CLAUDE_CODE_RUNTIME_PLAN.md) |
 | **cursor** | 🔜 Deferred | Not implemented; this document |
 | **openclaw** | 🔜 Planned | Gateway RPC |
 
@@ -181,15 +181,17 @@ developer machine:
 
 ```python
 # backend/hermes-plugins/orchestra/__init__.py (abbreviated)
-# on_session_start  → POST /internal/ready
-# pre_llm_call      → GET /internal/orchestra-context
-# post_llm_call     → POST /internal/turn-ended
-# orchestra_handoff → POST /internal/call-agent
+# on_session_start     → POST /internal/ready
+# pre_llm_call         → POST /internal/turn-started + GET /internal/orchestra-context
+# transform_llm_output → parse @@HANDOFF/@@CARD → POST /internal/call-agent
+# post_llm_call        → POST /internal/turn-ended
 ```
 
 Hermes provides three pieces Cursor does not replicate 1:1:
 
-1. **In-process tool registration** (`register_tool`) — Cursor needs MCP.
+1. **An output-transform hook** (`transform_llm_output`) that parses the
+   `@@HANDOFF` sentinels *and strips them from the shown output* — Cursor has no
+   equivalent, so sentinels would stay visible or need MCP tools instead.
 2. **Guaranteed per-turn appendix injection** (`pre_llm_call`) — Cursor gap (§6).
 3. **In-process turn state** (e.g. `_handoff_called_this_turn`) — Cursor needs
    hook `postToolUse` + file marker or backend inference (as planned for Claude).
@@ -201,7 +203,7 @@ Hermes provides three pieces Cursor does not replicate 1:1:
 | Orchestra requirement | pi | Hermes | Claude (plan) | Cursor Agent |
 |----------------------|-----|--------|---------------|--------------|
 | PTY + xterm | ✅ | ✅ | ✅ | ⚠️ Spike required |
-| Structured handoff | `@@HANDOFF` text | native tool | MCP tool | MCP tool |
+| Structured handoff | `@@HANDOFF` text | same `@@HANDOFF` text | same `@@HANDOFF` text (plan) | `@@HANDOFF` text or MCP tool |
 | Per-turn appendix | pi extension | `pre_llm_call` | `UserPromptSubmit` hook | ⚠️ `beforeSubmitPrompt` — undocumented for injection |
 | Ready signal | session_start | `on_session_start` | `SessionStart` | `sessionStart` |
 | Turn-end watchdog | extension | `post_llm_call` | `Stop` | `stop` |

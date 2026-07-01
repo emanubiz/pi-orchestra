@@ -94,11 +94,13 @@ POST /api/validate-path    { path }
 → { ok, path } | { ok: false, error }
 ```
 
-### Internal (pi extension callbacks)
+### Internal (agent-runtime callbacks)
 
-These are called by `backend/pi-extensions/call-agent.ts` running inside each
-node's pi terminal. When `PINODES_ORCHESTRA_TOKEN` is set, they require the same
-auth headers as other routes (the pi extension reads the token from its PTY env).
+These are called by the runtime bridge running inside each node's terminal —
+the pi extension (`backend/pi-extensions/call-agent.ts`) or the Hermes plugin
+(`backend/hermes-plugins/orchestra/`). When `PINODES_ORCHESTRA_TOKEN` is set,
+they require the same auth headers as other routes (the bridges read the token
+from their PTY env).
 
 ```http
 POST /internal/call-agent      { boardId, fromNodeId, targetNodeId, message }
@@ -108,6 +110,8 @@ GET  /internal/orchestra-context?boardId=&nodeId=
   → 404 if the board/node is unknown (extension degrades to its baked fallback appendix)
   # `enforce` is the per-node determinism-watchdog flag (false → free-chat mode)
 POST /internal/ready           { boardId, nodeId }              # session_start → flush queued injects
+POST /internal/turn-started    { boardId, nodeId }              # agent began a turn → closed-loop submit confirm, node busy
+POST /internal/turn-ended      { boardId, nodeId, handoffCalledThisTurn }  # node idle; Hermes-only handoff nudge
 POST /internal/handoff-failed  { boardId, nodeId, reason, recipients? }  # watchdog gave up → node card error
 ```
 
@@ -260,7 +264,7 @@ curl -s http://localhost:3847/api/v1/orchestra/flows \
 
 Standalone localhost deployments can run with no auth (default). The **VS Code
 extension auto-generates an ephemeral token per session** even when none is
-configured — see [`vscode-extension/src/sessionToken.ts`](../vscode-extension/src/sessionToken.ts)
+configured — see [`vscode-extension/src/sessionToken.ts`](../../vscode-extension/src/sessionToken.ts)
 and [`SECURITY.md`](./SECURITY.md).
 
 For remote embeds or programmatic consumers, set the environment variable:
@@ -360,11 +364,11 @@ ws.onopen = () => {
 
 ---
 
-## Planned — node runtime field
+## Node runtime field (implemented)
 
-Implemented: `runtime?: "pi" | "hermes"` and `runtimeConfig?: Record<string, unknown>`.
-Hermes is available when the `hermes` CLI is on the backend PATH (see
-[HERMES_RUNTIME.md](./guides/HERMES_RUNTIME.md)). Optional `PINODES_ORCHESTRA_HERMES=false`
+`runtime?: "pi" | "hermes"` and `runtimeConfig?: Record<string, unknown>`.
+Hermes is auto-detected when the `hermes` CLI is on the backend PATH (see
+[HERMES_RUNTIME.md](./HERMES_RUNTIME.md)). Optional `PINODES_ORCHESTRA_HERMES=false`
 disables it; `true` forces it on.
 
 In the **web UI**, runtime is set when creating a node (`POST` equivalent via the add-agent

@@ -8,7 +8,7 @@ Ordered map of all project documentation. **Start here** if you are lost among r
 pinodes-orchestra/
 ├── README.md                          ← Quick start, config, prompt library
 ├── ARCHITECTURE.md                    ← Current system design (backend, runtimes, handoff)
-├── prompts/*.md                       ← Built-in system prompt templates (14 roles)
+├── prompts/*.md                       ← Built-in system prompt templates (29 roles)
 └── docs/
     ├── README.md                      ← You are here
     │
@@ -26,20 +26,19 @@ pinodes-orchestra/
     │   └── EXPANSION_MOBILE_AND_PHYSICAL.md
     │
     ├── plans/                         ← Detailed implementation plans
-    │   ├── HERMES_TUI_IMPLEMENTATION_PLAN.md   ✅ completed (feat/multi-runtime)
     │   ├── CLAUDE_CODE_RUNTIME_PLAN.md         🔜 planned
     │   └── CURSOR_RUNTIME_ANALYSIS.md          ⏸️ deferred (feasibility study)
     │
     ├── checklists/
     │   └── PRE_MERGE_TEST_CHECKLIST.md
     │
-    ├── archive/                       ← Spikes & pre-implementation analysis (historical)
+    ├── archive/                       ← Completed plans, spikes & pre-build analysis (historical)
+    │   ├── HERMES_TUI_IMPLEMENTATION_PLAN.md   ✅ completed (feat/multi-runtime)
     │   ├── HERMES_TUI_SPIKE_RESULT.md
     │   └── HERMES_TUI_IMPACT_ANALYSIS.md
     │
     └── reviews/                       ← Audit / review artifacts (point-in-time)
-        ├── AUDIT_REVIEW_hermes-tui-runtime.md
-        └── REVIEW_findings.md
+        └── AUDIT_REVIEW_hermes-tui-runtime.md
 ```
 
 Also: [`vscode-extension/README.md`](../vscode-extension/README.md) — Cursor / VS Code extension.
@@ -78,7 +77,8 @@ Also: [`vscode-extension/README.md`](../vscode-extension/README.md) — Cursor /
 | Hermes Desktop embedded tab | 🔜 Host-side work |
 | OpenClaw integration | 🔜 |
 | Mobile companion / physical runtime | 🔜 [roadmaps/EXPANSION_MOBILE_AND_PHYSICAL.md](./roadmaps/EXPANSION_MOBILE_AND_PHYSICAL.md) |
-| Non-coding prompt library expansion | 🔜 Planned (research, writing, spreadsheets, …) |
+| Non-coding prompt library (research, writing, business, data) | ✅ 4 packs, 15 roles (29 built-ins total) |
+| Closed-loop submit confirmation (`/internal/turn-started`) | ✅ See [ARCHITECTURE.md](../ARCHITECTURE.md) |
 
 ---
 
@@ -93,4 +93,4 @@ Also: [`vscode-extension/README.md`](../vscode-extension/README.md) — Cursor /
 | `archive/` | Spikes and pre-build analysis — **read-only** after feature ships |
 | `reviews/` | Point-in-time audit/review; do not edit unless re-auditing |
 
-When a plan is fully implemented, mark it ✅ in this index and move supporting spikes to `archive/`.
+When a plan is fully implemented, move it (and its supporting spikes) to `archive/` and mark it ✅ in this index.

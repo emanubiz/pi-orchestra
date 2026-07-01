@@ -4,6 +4,27 @@ All notable changes to the **PiNodes Orchestra** extension are documented here.
 
 ## 0.2.19
 
+### Added
+
+- **Closed-loop submit confirmation.** After injecting a task (bracketed-paste +
+  `\r`), the backend now *verifies* delivery instead of assuming it: both
+  runtimes POST `/internal/turn-started` when the agent begins a turn (pi:
+  `before_agent_start`; Hermes: `pre_llm_call`, once per turn), which disarms a
+  submit watch armed when the `\r` was written. No confirmation within 1.5s →
+  the watch re-sends just `\r` (the paste is already in the buffer, never
+  duplicated), up to 3 retries, then surfaces a "delivery may be stuck" node
+  error. Injects that land while the recipient is mid-turn park their watch
+  until the turn ends. This deterministically fixes pipelines silently stalling
+  on a paste/submit race. `/internal/turn-ended` is now posted by **both**
+  runtimes (busy→idle transition); the server-side handoff nudge stays
+  Hermes-only (pi keeps its client-side `enforceIntent`).
+- **4 non-coding prompt packs (15 new roles, 29 built-ins total).** Research &
+  Analysis (Researcher, Fact-Checker, Analyst, Research Editor), Content &
+  Writing (Content Strategist, Writer, Copy Editor, Proofreader & SEO),
+  Business & Strategy (Market Analyst, Business Strategist, Financial Modeler,
+  Strategy Reviewer), Data & Insights (Data Analyst, Statistician, Report
+  Writer). Seeded by UPSERT — existing databases pick them up on next start.
+
 ### Changed
 
 - **One handoff standard across runtimes.** Hermes nodes now use the **same**
@@ -186,7 +207,7 @@ All notable changes to the **PiNodes Orchestra** extension are documented here.
 
 ### Docs
 
-- New [`docs/MULTI_INSTANCE.md`](../docs/MULTI_INSTANCE.md): the problem, the
+- New [`docs/MULTI_INSTANCE.md`](../docs/guides/MULTI_INSTANCE.md): the problem, the
   per-window model, the code map, and why security is unchanged.
 - `README.md`, `ARCHITECTURE.md`, `vscode-extension/README.md`,
   `docs/EXTENSIONS_ROADMAP.md`, `docs/SECURITY.md` updated to drop the obsolete
@@ -220,7 +241,7 @@ All notable changes to the **PiNodes Orchestra** extension are documented here.
 - Ephemeral per-session auto-token finalized in the extension host (see the
   0.2.14 *Security* notes); `sessionToken.ts` ships with unit tests.
 - Docs consolidated: the security hardening plan is now reference documentation
-  at [`docs/SECURITY.md`](../docs/SECURITY.md) (threat model, current controls,
+  at [`docs/SECURITY.md`](../docs/guides/SECURITY.md) (threat model, current controls,
   known limitations) instead of a phased plan; the transient Windows
   pi-extension bug note was removed now that the fix has shipped.
 

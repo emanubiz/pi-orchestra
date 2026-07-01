@@ -24,7 +24,7 @@
 
 **PiNodes Orchestra** today is a web app / PWA (+ VS Code/Cursor extension) that displays an **agent node canvas**. Each node is a real AI process in a PTY (`pi` or `hermes`), connected to other nodes by **edges** that define handoff permissions. The human can intervene at any time in a node's terminal.
 
-Current stack (see [ARCHITECTURE.md](../ARCHITECTURE.md)):
+Current stack (see [ARCHITECTURE.md](../../ARCHITECTURE.md)):
 
 ```
 Frontend (React Flow + xterm + Kanban)
@@ -495,7 +495,7 @@ Phase P3   🔜 Reference edge (Raspberry Pi)
 | [PROGRAMMATIC_API.md](../guides/PROGRAMMATIC_API.md) | REST/WS reused by mobile |
 | [SECURITY.md](../guides/SECURITY.md) | Token, bind localhost, threat model |
 | [MULTI_INSTANCE.md](../guides/MULTI_INSTANCE.md) | Board isolation per cwd |
-| [HERMES_TUI_IMPLEMENTATION_PLAN.md](../plans/HERMES_TUI_IMPLEMENTATION_PLAN.md) | Multi-runtime pattern (Pi/Hermes) — ✅ completed |
+| [HERMES_TUI_IMPLEMENTATION_PLAN.md](../archive/HERMES_TUI_IMPLEMENTATION_PLAN.md) | Multi-runtime pattern (Pi/Hermes) — ✅ completed |
 
 ---
 

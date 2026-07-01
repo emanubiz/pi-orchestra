@@ -171,19 +171,6 @@ describe("PiRuntime", () => {
     expect(spawnCall.args[toolsIdx + 1]).toBe("read,bash,edit,write,grep");
   });
 
-  it("bakes the appendix into --system-prompt when the extension is absent", () => {
-    // Override the fs mock just for this test: report extension missing.
-    vi.doMock("node:fs", () => ({
-      default: {
-        existsSync: () => false,
-        statSync: () => ({ isFile: () => true }),
-      },
-    }));
-    // Re-import PiRuntime with the new mock.
-    // For simplicity we just assert the existing mock behaviour is correct;
-    // a dedicated integration test covers the appendix-baking path.
-  });
-
   it("sets the expected pty options (cwd, env, size)", () => {
     const oldToken = process.env.PINODES_ORCHESTRA_TOKEN;
     process.env.PINODES_ORCHESTRA_TOKEN = "test-token";

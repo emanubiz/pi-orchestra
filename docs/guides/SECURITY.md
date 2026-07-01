@@ -9,7 +9,7 @@ current security posture, not a roadmap.
 
 The backend runs locally (or, opt-in, on a LAN) for a **single developer**.
 Nothing here assumes multi-user or internet-exposed deployments — those are out
-of scope (see [ARCHITECTURE.md](../ARCHITECTURE.md)).
+of scope (see [ARCHITECTURE.md](../../ARCHITECTURE.md)).
 
 The realistic attacker is **a web page the user visits while the backend is
 up** — a compromised site, a malicious ad, or a drive-by script — that opens a

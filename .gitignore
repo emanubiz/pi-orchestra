@@ -30,3 +30,6 @@ data/
 # Logs
 *.log
 npm-debug.log*
+
+# Python bytecode (hermes plugin)
+__pycache__/

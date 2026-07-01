@@ -43,8 +43,12 @@ function request(method, urlPath, body) {
         path: urlPath,
         method,
         headers: {
-          "Content-Type": "application/json",
-          ...(data ? { "Content-Length": Buffer.byteLength(data) } : {}),
+          // Only declare a JSON body when there IS one: Fastify rejects an
+          // empty body sent with Content-Type: application/json (400,
+          // FST_ERR_CTP_EMPTY_JSON_BODY) — e.g. on bare DELETEs.
+          ...(data
+            ? { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(data) }
+            : {}),
         },
       },
       (res) => {

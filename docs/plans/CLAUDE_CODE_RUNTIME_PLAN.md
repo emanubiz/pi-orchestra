@@ -5,9 +5,24 @@
 > `pi` and `hermes`, reusing the existing `INodeRuntime` abstraction and the
 > existing `/internal/*` contract — no new backend endpoints.
 >
-> Companion docs: [`ARCHITECTURE.md`](../ARCHITECTURE.md) (runtime model),
-> [`HERMES_TUI_IMPLEMENTATION_PLAN.md`](./HERMES_TUI_IMPLEMENTATION_PLAN.md) (✅ completed)
-> (the pattern this mirrors), [`MULTI_INSTANCE.md`](./MULTI_INSTANCE.md)
+> **Revision 2026-07-02 — handoff protocol superseded.** Since `a46eab1` all
+> runtimes share **one text-sentinel protocol** (`@@HANDOFF:<handle> … @@END`,
+> `@@CARD`, `@@DONE`) instead of per-runtime native tools — the Hermes plugin no
+> longer registers `orchestra_handoff`/`orchestra_card`; it parses the sentinels
+> in its `transform_llm_output` hook. **§2.2 (MCP tool server for handoff/card)
+> is therefore superseded:** the Claude runtime shim should parse the same
+> sentinels from the turn's final output (e.g. in the `Stop` hook, reading the
+> transcript) and POST `/internal/call-agent` / `/internal/card-status`, exactly
+> like the Hermes plugin. The lifecycle-hook mapping (§2.3) remains valid, with
+> one addition: the shim must also POST the (since-added) `/internal/turn-started`
+> once per turn for the closed-loop submit confirmation (see
+> [`ARCHITECTURE.md`](../../ARCHITECTURE.md) § Closed-loop submit confirmation).
+> §3 is resolved by the text protocol: the `Stop` hook knows whether the turn's
+> output contained a `@@HANDOFF` block.
+>
+> Companion docs: [`ARCHITECTURE.md`](../../ARCHITECTURE.md) (runtime model),
+> [`HERMES_TUI_IMPLEMENTATION_PLAN.md`](../archive/HERMES_TUI_IMPLEMENTATION_PLAN.md) (✅ completed)
+> (the pattern this mirrors), [`MULTI_INSTANCE.md`](../guides/MULTI_INSTANCE.md)
 > (per-window isolation, unaffected by this work).
 
 ---
@@ -15,14 +30,14 @@
 ## 1. Why Claude Code is the natural next runtime
 
 The Hermes integration already proved the design: a node is a PTY, and
-agent↔orchestra coordination happens through **native tools** (no `@@HANDOFF`
-text parsing) plus **lifecycle hooks**, all bridging to the same `/internal/*`
+agent↔orchestra coordination happens through the **shared `@@HANDOFF` text
+protocol** plus **lifecycle hooks**, all bridging to the same `/internal/*`
 endpoints `pi` uses. Claude Code maps onto that pattern almost one-to-one:
 
 | Orchestra need | Hermes (implemented) | Claude Code (this plan) |
 |---|---|---|
 | Visual node = live terminal | `hermes --tui` in PTY | `claude` (interactive) in PTY |
-| Native handoff / card tools | `ctx.register_tool(...)` in `__init__.py` | **MCP server** `orchestra` exposing `orchestra_handoff` / `orchestra_card` |
+| Handoff / card expression | `@@HANDOFF`/`@@CARD` sentinels parsed in `transform_llm_output` | **Same sentinels**, parsed from the turn's output (`Stop` hook / output transform) |
 | Per-turn context refresh | `pre_llm_call` hook → `GET /internal/orchestra-context` | **`UserPromptSubmit` hook** → same endpoint (emits `additionalContext`) |
 | Ready signal | `on_session_start` → `POST /internal/ready` | **`SessionStart` hook** → same endpoint |
 | Turn-end watchdog | `post_llm_call` → `POST /internal/turn-ended` | **`Stop` hook** → same endpoint |
@@ -32,14 +47,14 @@ endpoints `pi` uses. Claude Code maps onto that pattern almost one-to-one:
 The decisive property: Claude Code has **both** a tool surface (MCP) *and* a
 real lifecycle-hook system. Cursor has MCP but no per-turn hook; that gap is why
 Claude Code, not Cursor, is the next runtime. See the comparison in
-[`ARCHITECTURE.md`](../ARCHITECTURE.md) once this lands.
+[`ARCHITECTURE.md`](../../ARCHITECTURE.md) once this lands.
 
 **Reuse, not new surface.** This integration adds **zero** `/internal/*`
 endpoints. `orchestra_handoff` → `POST /internal/call-agent`, `orchestra_card` →
 `POST /internal/card-status`, plus the three lifecycle endpoints already used by
 both `pi` and Hermes (`/internal/ready`, `/internal/orchestra-context`,
 `/internal/turn-ended`). The multi-instance callback invariant
-([`MULTI_INSTANCE.md`](./MULTI_INSTANCE.md)) holds unchanged: `ClaudeRuntime`
+([`MULTI_INSTANCE.md`](../guides/MULTI_INSTANCE.md)) holds unchanged: `ClaudeRuntime`
 passes `orchestraUrl: BASE_URL` (from `PtyHub.ts`) into the child, so callbacks
 land in the right per-window backend.
 
@@ -271,5 +286,3 @@ the only code symbols that should move are the new `ClaudeRuntime`, the
   `/internal/*` contract.
 - No new backend endpoints. No secrets in `runtimeConfig`. Multi-instance
   isolation untouched.
-</content>
-</invoke>

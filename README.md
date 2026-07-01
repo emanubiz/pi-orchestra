@@ -79,8 +79,8 @@ Details: [`vscode-extension/README.md`](./vscode-extension/README.md),
 4. Select a node → interactive terminal in side panel; runtime badge on the card is read-only; **Timeline** tab shows handoff chronology
 5. Per-node card controls (icons on the card header): **flag** toggles `canBeFinal` (may end the chain vs. must hand off), **shield** toggles the handoff watchdog (on = must hand off or say it's done; off = free chat), **scroll** opens the per-node system-prompt override. Kanban cards advance through columns automatically as nodes change status.
 6. Agents hand off via `@@HANDOFF` blocks (see [ARCHITECTURE.md](./ARCHITECTURE.md))
-6. **Save** / **Load…** for workflows (stored with cwd + entry node)
-7. **Kanban** view: launch tasks into entry nodes
+7. **Save** / **Load…** for workflows (stored with cwd + entry node)
+8. **Kanban** view: launch tasks into entry nodes
 
 ## Configuration
 
@@ -121,7 +121,9 @@ When `PINODES_ORCHESTRA_TOKEN` is set, browser clients must provide it. The VS C
 
 ## Built-in Prompt Library
 
-The project ships 14 built-in system prompts (`prompts/*.md`), seeded into SQLite on first start:
+The project ships 29 built-in system prompts (`prompts/*.md`), seeded into SQLite on first start — 14 software-team roles plus 4 non-coding pipeline packs:
+
+**Software team (14):**
 
 | ID | Role | Focus |
 |----|------|-------|
@@ -139,6 +141,15 @@ The project ships 14 built-in system prompts (`prompts/*.md`), seeded into SQLit
 | `builtin-auditor` | Auditor | 360° codebase audit: architecture, security, performance, debt |
 | `builtin-security-reviewer` | Security Reviewer | Threat modelling, OWASP, dependency scanning, hardening |
 | `builtin-writer` | Technical Writer | READMEs, API docs, changelogs, guides |
+
+**Non-coding pipeline packs (15):**
+
+| Pack | Roles |
+|------|-------|
+| Research & Analysis | Researcher, Fact-Checker, Analyst, Research Editor |
+| Content & Writing | Content Strategist, Writer, Copy Editor, Proofreader & SEO |
+| Business & Strategy | Market Analyst, Business Strategist, Financial Modeler, Strategy Reviewer |
+| Data & Insights | Data Analyst, Statistician, Report Writer |
 
 Users can create custom prompts via the UI or the REST API; custom prompts coexist with built-ins.
 
