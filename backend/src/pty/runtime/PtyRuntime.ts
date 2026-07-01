@@ -39,11 +39,22 @@ export abstract class PtyRuntime implements INodeRuntime {
     );
   }
 
-  inject(message: string): void {
+  inject(message: string, onSubmitSent?: () => void): void {
     if (!this.ptyInstance) return;
     // Bracketed paste keeps embedded newlines from submitting early.
     this.ptyInstance.write(`\x1b[200~${message}\x1b[201~`);
-    setTimeout(() => this.ptyInstance?.write("\r"), this.submitDelayMs(message));
+    setTimeout(() => {
+      this.ptyInstance?.write("\r");
+      // Fires after the submit byte is written so the caller can arm a closed-
+      // loop delivery watch (confirm a turn started in the recipient, or
+      // re-send `\r`). Best-effort: never throws even if the PTY died between
+      // the paste and the submit.
+      try {
+        onSubmitSent?.();
+      } catch {
+        /* ignore — a watcher error must never break the submit path */
+      }
+    }, this.submitDelayMs(message));
   }
 
   resize(cols: number, rows: number): void {

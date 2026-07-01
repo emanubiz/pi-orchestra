@@ -788,4 +788,126 @@ describe("PtyHub", () => {
       expect(call.args).toContain("--tui");
     });
   });
+
+  // ── Closed-loop submit confirmation (plan B) ────────────────────────────────
+  // The watch is armed when the submit `\r` is written (after the paste→submit
+  // delay), disarmed by turn-started, and re-sends `\r` on timeout. Timing:
+  // pi's submitDelayMs floor is 80ms; SUBMIT_CONFIRM_MS is 1500ms.
+
+  function countCr(inst: FakePty): number {
+    return inst.writes.filter((w) => w === "\r").length;
+  }
+
+  describe("submit-watch state machine", () => {
+    it("turn-started disarms the watch — no re-send after confirmation", () => {
+      vi.useFakeTimers();
+      hub.setGraph(BOARD, graphOf({ edges: true }), "/tmp");
+      hub.ensure(BOARD, "n1", 80, 24);
+      hub.markReady(BOARD, "n1");
+      const inst = ptyFor("n1")!;
+
+      hub.injectTask(BOARD, "n1", "a task");
+      vi.advanceTimersByTime(80); // paste→submit → `\r` written, watch armed
+      expect(countCr(inst)).toBe(1);
+
+      hub.handleTurnStarted(BOARD, "n1"); // confirm → disarm
+      vi.advanceTimersByTime(1_500); // past SUBMIT_CONFIRM_MS
+      expect(countCr(inst)).toBe(1); // no re-send
+    });
+
+    it("watch re-sends `\r` on timeout, then turn-started disarms", () => {
+      vi.useFakeTimers();
+      hub.setGraph(BOARD, graphOf({ edges: true }), "/tmp");
+      hub.ensure(BOARD, "n1", 80, 24);
+      hub.markReady(BOARD, "n1");
+      const inst = ptyFor("n1")!;
+
+      hub.injectTask(BOARD, "n1", "a task");
+      vi.advanceTimersByTime(80); // submit → watch armed
+      expect(countCr(inst)).toBe(1);
+
+      vi.advanceTimersByTime(1_500); // timeout → re-send `\r` (retries=1)
+      expect(countCr(inst)).toBe(2);
+
+      hub.handleTurnStarted(BOARD, "n1"); // disarm
+      vi.advanceTimersByTime(1_500); // no further timeout
+      expect(countCr(inst)).toBe(2);
+    });
+
+    it("errors after MAX_SUBMIT_RETRIES timeouts (3 re-sends then a stuck error)", () => {
+      vi.useFakeTimers();
+      const broadcasts: Array<Record<string, unknown>> = [];
+      hub.setBroadcast((msg) => broadcasts.push(msg));
+      hub.setGraph(BOARD, graphOf({ edges: true }), "/tmp");
+      hub.ensure(BOARD, "n1", 80, 24);
+      hub.markReady(BOARD, "n1");
+      const inst = ptyFor("n1")!;
+
+      hub.injectTask(BOARD, "n1", "a task");
+      vi.advanceTimersByTime(80); // submit → 1 `\r`, watch armed
+
+      vi.advanceTimersByTime(1_500); // timeout 1 → re-send (2nd `\r`)
+      vi.advanceTimersByTime(1_500); // timeout 2 → re-send (3rd `\r`)
+      vi.advanceTimersByTime(1_500); // timeout 3 → re-send (4th `\r`)
+      vi.advanceTimersByTime(1_500); // timeout 4 → cap exceeded → error
+
+      expect(countCr(inst)).toBe(4); // 1 submit + 3 re-sends
+      expect(broadcasts).toContainEqual(
+        expect.objectContaining({ type: "node_status", boardId: BOARD, nodeId: "n1", status: "error" }),
+      );
+    });
+
+    it("inject while busy parks the watch; turn-ended arms it", () => {
+      vi.useFakeTimers();
+      hub.setGraph(BOARD, graphOf({ edges: true }), "/tmp");
+      hub.ensure(BOARD, "n1", 80, 24);
+      hub.markReady(BOARD, "n1");
+      const inst = ptyFor("n1")!;
+
+      hub.handleTurnStarted(BOARD, "n1"); // node busy
+      // "task" (4 chars) → submitDelayMs = 80 + round(0.2) = 80ms exactly, so the
+      // submit lands within the first 80ms advance (longer messages shift it past
+      // 80 and the snapshot would capture a not-yet-fired submit).
+      hub.injectTask(BOARD, "n1", "task");
+      vi.advanceTimersByTime(80); // paste+submit land during the turn
+      const submitsSoFar = countCr(inst); // the one submit `\r`
+
+      vi.advanceTimersByTime(1_500); // watch NOT armed yet → no timeout re-send
+      expect(countCr(inst)).toBe(submitsSoFar);
+
+      hub.handleTurnEnded(BOARD, "n1", false); // idle → arm parked watch
+      vi.advanceTimersByTime(1_500); // now the watch fires → re-send `\r`
+      expect(countCr(inst)).toBe(submitsSoFar + 1);
+    });
+
+    it("kill clears submit state — no timer fires after kill", () => {
+      vi.useFakeTimers();
+      const broadcasts: Array<Record<string, unknown>> = [];
+      hub.setBroadcast((msg) => broadcasts.push(msg));
+      hub.setGraph(BOARD, graphOf({ edges: true }), "/tmp");
+      hub.ensure(BOARD, "n1", 80, 24);
+      hub.markReady(BOARD, "n1");
+
+      hub.injectTask(BOARD, "n1", "a task");
+      vi.advanceTimersByTime(80); // submit → watch armed
+      hub.kill(BOARD, "n1");
+      vi.advanceTimersByTime(5_000); // well past all timeouts
+
+      expect(broadcasts.filter((m) => m.status === "error")).toHaveLength(0);
+    });
+
+    it("handleTurnEnded does NOT nudge pi nodes server-side (pi enforces client-side)", () => {
+      vi.useFakeTimers();
+      hub.setGraph(BOARD, graphOf({ edges: true, n1Runtime: "pi", n1Final: false }), "/tmp");
+      hub.ensure(BOARD, "n1", 80, 24);
+      hub.markReady(BOARD, "n1");
+      const inst = ptyFor("n1")!;
+      const writesBefore = inst.writes.length;
+
+      const res = hub.handleTurnEnded(BOARD, "n1", false);
+      expect(res).toEqual({ ok: true });
+      // No nudge injected for a pi node — its extension handles intent itself.
+      expect(inst.writes.length).toBe(writesBefore);
+    });
+  });
 });

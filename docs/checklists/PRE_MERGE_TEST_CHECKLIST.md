@@ -1,7 +1,7 @@
 # Pre-Merge Test Checklist — feat/multi-runtime
 
 **Branch:** feat/multi-runtime
-**Date:** 2025-07-XX (fill before testing)
+**Date:** 2026-07-XX (fill before testing)
 **Tester:** ___________
 
 > Quick sanity before merging into main. Each section takes ~2 minutes.
@@ -81,11 +81,11 @@ This tests that the ring buffer (256 KB cap) works correctly under heavy output.
 | Modal opens | Prompt list with search |  |
 | View (eye) | Read-only preview; **no node spawned** |  |
 | Custom prompt | Can create and continue to runtime step |  |
-| Runtime step | pi default; hermes available when flag on |  |
+| Runtime step | pi default; hermes available when detected on the backend PATH |  |
 | Create node | Node appears with correct prompt + runtime badge |  |
 | Runtime locked | No pi/hm toggle on card or Inspector (badge only) |  |
 | Graph persistence | After reload, runtime choice is preserved |  |
-| Flag warning | If Hermes selected but flag off, warning in runtime step |  |
+| Availability warning | If Hermes selected but not available on the backend, warning in runtime step |  |
 
 > Note: Hermes won't actually spawn unless step 4 is configured.
 
@@ -95,11 +95,12 @@ This tests that the ring buffer (256 KB cap) works correctly under heavy output.
 
 ### 4a. Plugin Auto-Install
 
-No manual setup — the plugin installs itself on first Hermes spawn. Just ensure
-the Hermes CLI is on PATH and the runtime is enabled:
+No manual setup — the plugin installs itself on first Hermes spawn, and the
+runtime is auto-detected when the `hermes` CLI is on the backend PATH. Only
+force the flag if auto-detection can't see your install:
 
 ```bash
-export PINODES_ORCHESTRA_HERMES=true
+export PINODES_ORCHESTRA_HERMES=true   # optional override; auto-detect is the default
 ```
 
 | Check | Expected | ✅/❌ |
@@ -110,7 +111,7 @@ export PINODES_ORCHESTRA_HERMES=true
 
 ### 4b. Runtime Test
 
-1. Restart the backend with `PINODES_ORCHESTRA_HERMES=true`.
+1. Restart the backend with `hermes` on its PATH (or `PINODES_ORCHESTRA_HERMES=true`).
 2. Create a board, add a node with **runtime: hermes**.
 3. Run it.
 
@@ -120,6 +121,8 @@ export PINODES_ORCHESTRA_HERMES=true
 | Plugin loads | No "plugin not found" errors in hermes output |  |
 | Handoff works | Hermes node emits `@@HANDOFF … @@END`; delivered to a connected pi **or** hermes node |  |
 | Handoff both ways | pi→hermes and hermes→pi both deliver (same text protocol) |  |
+| Submit confirmed | A delivered task starts a turn in the recipient (watch disarmed; no "delivery may be stuck" error) |  |
+| Stuck recovery | Disable the plugin (or block `/internal/turn-started`) so the recipient never confirms — the watch re-sends `\r` and recovers, or errors after 3 retries |  |
 
 > If `hermes` is not installed, the node should exit gracefully (not crash the backend).
 

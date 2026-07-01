@@ -2,7 +2,7 @@
 
 How to run **Hermes TUI** agents on Orchestra nodes alongside **pi**.
 
-> Implementation reference (completed): [plans/HERMES_TUI_IMPLEMENTATION_PLAN.md](../plans/HERMES_TUI_IMPLEMENTATION_PLAN.md)  
+> Implementation reference (completed, historical): [archive/HERMES_TUI_IMPLEMENTATION_PLAN.md](../archive/HERMES_TUI_IMPLEMENTATION_PLAN.md)  
 > Spike notes: [archive/HERMES_TUI_SPIKE_RESULT.md](../archive/HERMES_TUI_SPIKE_RESULT.md)
 
 ## Overview
@@ -81,8 +81,10 @@ If Hermes is selected but the CLI is not on the backend PATH, the runtime step s
 | Per-turn appendix (recipients, finality, kanban) | Refreshed into **system prompt** (`before_agent_start`) | Appended to **user message** via `pre_llm_call` — same info for the model, different slot |
 | Handoff expression | `@@HANDOFF:handle … @@END` text block | **Same** `@@HANDOFF` text block |
 | Where it's parsed | Extension on `agent_end` | Plugin `transform_llm_output` hook (also strips the block from the shown output) |
-| Delivery to target node | `POST /internal/call-agent` → inject PTY | Same |
-| Watchdog (non-final node must hand off) | Extension `before_agent_start` | Plugin → `POST /internal/turn-ended` → `PtyHub.handleTurnEnded` |
+| Delivery to target node | `POST /internal/call-agent` → inject PTY + closed-loop submit watch | Same |
+| Turn-started (submit confirmed) | `before_agent_start` → `POST /internal/turn-started` | `pre_llm_call` → `POST /internal/turn-started` (once per turn) |
+| Turn-ended (node idle) | `agent_end` → `POST /internal/turn-ended` | `post_llm_call` → `POST /internal/turn-ended` |
+| Watchdog (non-final node must hand off) | Extension `agent_end` (client-side `enforceIntent`) | Plugin → `POST /internal/turn-ended` → `PtyHub.handleTurnEnded` (server-side nudge) |
 | Terminal rendering | xterm.js (ANSI) | xterm.js (identical) |
 
 ## Toolset override
@@ -106,6 +108,26 @@ node scripts/smoke.mjs
 ```
 
 Manual checklist: [checklists/PRE_MERGE_TEST_CHECKLIST.md](../checklists/PRE_MERGE_TEST_CHECKLIST.md) §3–4.
+
+## Closed-loop submit confirmation
+
+An injected task (bracketed-paste + `\r`) can silently fail to submit — a timing
+race leaves the message in the prompt, never sent, and the pipeline stalls. The
+backend closes the loop on the *outcome*: a turn starting proves the message
+reached the model.
+
+- `injectAndWatch` arms a submit watch when the `\r` is written.
+- `handleTurnStarted` (from `/internal/turn-started`) disarms it and marks the
+  node busy.
+- If no confirmation arrives within 1.5s, the watch re-sends just `\r` (the
+  paste is already in the buffer — never duplicated) and retries up to 3 times,
+  then surfaces a "delivery may be stuck" error.
+- An inject that lands while busy parks its watch until the turn ends.
+
+This is deterministic (acts on a real turn-start, not a time guess) and
+runtime-agnostic — it covers the pi→hermes race that motivated it, and any
+future runtime too. See [ARCHITECTURE.md](../../ARCHITECTURE.md) §Closed-loop
+submit confirmation.
 
 ## Related
 

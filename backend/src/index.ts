@@ -140,6 +140,19 @@ app.post<{ Body: { boardId: string; nodeId: string } }>(
   },
 );
 
+// Closed-loop submit confirmation (plan B): the agent began a turn, which
+// proves an injected task's paste+submit actually reached the model. Both
+// runtimes POST this once per turn (pi: before_agent_start; Hermes: pre_llm_call
+// — the plugin guards against double-signalling within a turn). PtyHub disarms
+// the submit watch and marks the node busy so a mid-turn inject parks its watch.
+app.post<{ Body: { boardId: string; nodeId: string } }>(
+  "/internal/turn-started",
+  async (req) => {
+    const { boardId, nodeId } = req.body;
+    return ptyHub.handleTurnStarted(boardId, nodeId);
+  },
+);
+
 // Hermes post_llm_call hook: the agent finished a turn. Delegates to PtyHub,
 // which owns the retry state and nudge/error logic (see handleTurnEnded) —
 // this is the Hermes equivalent of pi's client-side explicit-intent watchdog.

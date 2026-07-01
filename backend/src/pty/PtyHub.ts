@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import { getPrompt } from "../db/index.js";
-import type { NodeStatus, WorkflowEdge, WorkflowGraph, WorkflowNode } from "../types.js";
+import type { NodeRuntime, NodeStatus, WorkflowEdge, WorkflowGraph, WorkflowNode } from "../types.js";
 import { resolveCwd } from "../utils/paths.js";
 import type { INodeRuntime } from "./runtime/INodeRuntime.js";
 import { HermesRuntime } from "./runtime/HermesRuntime.js";
@@ -20,6 +20,18 @@ const ENFORCE_DEFAULT = process.env.PINODES_ORCHESTRA_ENFORCE !== "false";
 // Nudge retries for the Hermes turn-ended watchdog before a non-final node
 // that won't hand off is reported as an error (see handleTurnEnded).
 const MAX_TURN_ENDED_RETRIES = 3;
+// ── Closed-loop submit confirmation (plan B) ─────────────────────────────────
+// After injecting a task (bracketed-paste + `\r`) we can't observe whether the
+// runtime's input line actually submitted it — a timing/async race can leave the
+// message sitting in the prompt, never sent (the pipeline then stalls silently).
+// So we close the loop on the *outcome*: the recipient starting a turn proves the
+// message reached the model. Each runtime POSTs /internal/turn-started when it
+// begins a turn (pi: before_agent_start; Hermes: pre_llm_call, once per turn).
+// If that confirmation doesn't arrive within SUBMIT_CONFIRM_MS of the submit, we
+// re-send just `\r` (the paste is already in the buffer) and retry up to
+// MAX_SUBMIT_RETRIES times before surfacing a "delivery may be stuck" error.
+const SUBMIT_CONFIRM_MS = 1_500;
+const MAX_SUBMIT_RETRIES = 3;
 const PORT = Number(
   process.env.PINODES_ORCHESTRA_PORT ?? process.env.PORT ?? 3847,
 );
@@ -64,6 +76,17 @@ export class PtyHub {
   private enforceOverride = new Map<string, boolean>();
   // Per-node retry counter for the Hermes turn-ended watchdog (handleTurnEnded).
   private turnEndedRetries = new Map<string, number>();
+  // ── Closed-loop submit confirmation state ─────────────────────────────────
+  // Nodes with an injected task awaiting a turn-started confirmation. The watch
+  // is armed when the submit `\r` is written (see injectAndWatch) and disarmed
+  // by handleTurnStarted. If it fires, we re-send `\r` and re-arm.
+  private submitWatch = new Map<string, { retries: number; timer: NodeJS.Timeout }>();
+  // Nodes currently processing a turn (turn-started received, turn-ended not yet).
+  // An inject that lands while busy parks its watch here and arms it when the
+  // node goes idle — otherwise the watch would fire mid-turn, before the node
+  // could even read the pasted input.
+  private busy = new Set<string>();
+  private pendingArm = new Set<string>();
   private events = new EventEmitter();
 
   setBroadcast(fn: BroadcastFn): void {
@@ -220,6 +243,13 @@ export class PtyHub {
   /** Whether a node is allowed to end the chain (undefined/null === yes). */
   private canBeFinal(boardId: string, nodeId: string): boolean {
     return this.graphs.get(boardId)?.nodes.get(nodeId)?.canBeFinal !== false;
+  }
+
+  /** The runtime type of a node ("pi" | "hermes"); defaults to "pi" when absent.
+   *  Used to gate the server-side handoff nudge to Hermes only — pi enforces
+   *  explicit intent client-side in its extension (enforceIntent). */
+  private nodeRuntime(boardId: string, nodeId: string): NodeRuntime {
+    return this.graphs.get(boardId)?.nodes.get(nodeId)?.runtime ?? "pi";
   }
 
   /** System-prompt appendix telling an agent which nodes it may hand off to.
@@ -401,11 +431,14 @@ export class PtyHub {
         this.broadcast({ type: "pty_output", boardId, nodeId, data });
       },
       onExit: (exitCode) => {
-        // Only clear if this exact session is still the active one (guards restart).
+        // Only clear if this exact session is still the active one (guards
+        // restart): a stale exit from a killed session must NOT clear the
+        // restarted session's bookkeeping — including submit-watch state.
         if (this.sessions.get(k) === session) {
           this.sessions.delete(k);
           this.ready.delete(k);
           this.waitingInjects.delete(k);
+          this.clearSubmitState(k);
         }
         this.broadcast({ type: "pty_exit", boardId, nodeId, code: exitCode });
         this.broadcast({ type: "node_status", boardId, nodeId, status: "idle" });
@@ -534,20 +567,156 @@ export class PtyHub {
   }
 
   /**
-   * Hermes `post_llm_call` bridge (`POST /internal/turn-ended`): the agent
-   * finished a turn. If it's a non-final node that didn't emit a @@HANDOFF
-   * block, nudge it — up to MAX_TURN_ENDED_RETRIES — before reporting the node
-   * as errored. The Hermes equivalent of pi's explicit-intent watchdog (which
-   * runs client-side in the pi extension).
+   * Inject a message and arm a closed-loop delivery watch. The watch confirms
+   * the recipient actually *started a turn* (it received and submitted the
+   * message) by waiting for `handleTurnStarted`; if that confirmation doesn't
+   * arrive in time it re-sends just `\r` (the paste is already in the buffer)
+   * and retries, up to `MAX_SUBMIT_RETRIES`, before surfacing a "delivery may be
+   * stuck" error. If the node is currently busy in a turn, the watch is parked
+   * (pendingArm) and armed when the turn ends, so it can't fire mid-turn.
+   *
+   * This is the deterministic successor to guessing the paste→submit timing: it
+   * acts on the real outcome (a turn started) rather than a time estimate, so it
+   * covers every race regardless of its true cause. Agnostic to the runtime too
+   * — works for pi and Hermes, and would still cover a future `acp` runtime.
+   */
+  private injectAndWatch(boardId: string, nodeId: string, message: string): void {
+    const k = key(boardId, nodeId);
+    const s = this.sessions.get(k);
+    if (!s) return;
+    const arm = () => this.armSubmitWatch(boardId, nodeId);
+    // If the node is mid-turn, parking the watch avoids a false alarm: the node
+    // can't pick up the pasted input until its current turn ends, so a turn-start
+    // for THIS message can't arrive yet. handleTurnEnded arms it then.
+    //
+    // NB: the paste itself still happens now (during the turn), so this is
+    // best-effort for the busy case — if a TUI drops raw PTY bytes while
+    // processing, the later `\r` re-send submits empty. Self-healing for the
+    // submit race (the common failure), and strictly better than the old
+    // no-busy-handling; a fully deferred busy-inject would be a future refinement.
+    if (this.busy.has(k)) {
+      s.runtime.inject(message, () => this.pendingArm.add(k));
+      return;
+    }
+    s.runtime.inject(message, arm);
+  }
+
+  /** Arm the submit-confirmation watchdog for a fresh submit (retries reset
+   *  to 0). Only the timeout-driven re-send preserves/increments the count —
+   *  a brand-new inject that supersedes an unconfirmed one starts clean, so it
+   *  isn't penalised for the previous (possibly lost) submit's failures. */
+  private armSubmitWatch(boardId: string, nodeId: string): void {
+    const k = key(boardId, nodeId);
+    const prev = this.submitWatch.get(k);
+    if (prev) clearTimeout(prev.timer);
+    const timer = setTimeout(() => this.onSubmitWatchTimeout(boardId, nodeId), SUBMIT_CONFIRM_MS);
+    // unref so a pending watch never keeps the backend process alive on its own.
+    timer.unref?.();
+    this.submitWatch.set(k, { retries: 0, timer });
+  }
+
+  /** Disarm the submit watch — the recipient started a turn, so the submit
+   *  landed. Called by handleTurnStarted. */
+  private disarmSubmitWatch(boardId: string, nodeId: string): void {
+    const k = key(boardId, nodeId);
+    const w = this.submitWatch.get(k);
+    if (!w) return;
+    clearTimeout(w.timer);
+    this.submitWatch.delete(k);
+  }
+
+  /** Clear all closed-loop submit state for a node (kill/exit). Stops a timer
+   *  from re-sending `\r` into a terminal that no longer exists. */
+  private clearSubmitState(k: string): void {
+    const w = this.submitWatch.get(k);
+    if (w) clearTimeout(w.timer);
+    this.submitWatch.delete(k);
+    this.busy.delete(k);
+    this.pendingArm.delete(k);
+  }
+
+  /** Submit watch fired: no turn-started confirmation in time. Re-send `\r`
+   *  (the paste is already in the input buffer) and re-arm, up to the cap. */
+  private onSubmitWatchTimeout(boardId: string, nodeId: string): void {
+    const k = key(boardId, nodeId);
+    const w = this.submitWatch.get(k);
+    if (!w) return;
+    if (w.retries + 1 > MAX_SUBMIT_RETRIES) {
+      this.submitWatch.delete(k);
+      this.notify({
+        type: "node_status",
+        boardId,
+        nodeId,
+        status: "error",
+        message:
+          `Delivery may be stuck: a task was injected but the agent didn't ` +
+          `start a turn after ${MAX_SUBMIT_RETRIES} submit retries. Check the ` +
+          `terminal — the message may need a manual Enter.`,
+      });
+      return;
+    }
+    const timer = setTimeout(() => this.onSubmitWatchTimeout(boardId, nodeId), SUBMIT_CONFIRM_MS);
+    timer.unref?.();
+    this.submitWatch.set(k, { retries: w.retries + 1, timer });
+    // Re-send Enter only — the paste payload is already in the input buffer, so
+    // repeating the full paste would duplicate the text in the prompt.
+    this.sessions.get(k)?.runtime.write("\r");
+  }
+
+  /**
+   * `POST /internal/turn-started` bridge: the agent began a turn. This is the
+   * closed-loop confirmation that an injected task actually reached the model —
+   * proving the paste+submit landed (disarming the submit watch). Also marks the
+   * node busy so an inject that arrives mid-turn parks its watch until the turn
+   * ends (handleTurnEnded), instead of timing out before the node could read it.
+   *
+   * Both runtimes call this once per turn: pi in `before_agent_start`, Hermes in
+   * `pre_llm_call` (the plugin guards against double-signalling within a turn).
+   */
+  handleTurnStarted(boardId: string, nodeId: string): { ok: true } {
+    const k = key(boardId, nodeId);
+    this.busy.add(k);
+    this.disarmSubmitWatch(boardId, nodeId);
+    return { ok: true };
+  }
+
+  /**
+   * `POST /internal/turn-ended` bridge: the agent finished a turn. Two jobs:
+   *  1. Mark the node idle and arm any submit watch that was parked while it was
+   *     busy (an inject that landed mid-turn now needs its delivery confirmed).
+   *  2. For Hermes non-final nodes that didn't hand off, nudge — up to
+   *     MAX_TURN_ENDED_RETRIES — before reporting errored. (pi enforces explicit
+   *     intent client-side in its extension, so the server-side nudge is
+   *     Hermes-only.) The Hermes equivalent of pi's `enforceIntent` watchdog.
+   *
+   *  Note: pi signals turn-started/turn-ended as fire-and-forget POSTs, so when a
+   *  followUp loop starts immediately the next turn-started can race the previous
+   *  turn-ended and briefly flip `busy`. The consequence is bounded and
+   *  self-healing for pi (the server-side nudge is Hermes-only, so `busy` only
+   *  affects submit-watch parking). Hermes is immune: pre/post_llm_call are
+   *  sequential within a turn, never concurrent.
    */
   handleTurnEnded(
     boardId: string,
     nodeId: string,
     handoffCalledThisTurn: boolean,
   ): { ok: true; retries?: number; exceeded?: boolean } {
-    const ctx = this.orchestraContext(boardId, nodeId);
-    if (!ctx || ctx.canBeFinal) return { ok: true };
     const k = key(boardId, nodeId);
+    this.busy.delete(k);
+    // An inject was parked while this node was busy — arm its watch now that the
+    // node can actually consume the pasted input and start a turn from it.
+    if (this.pendingArm.delete(k)) {
+      const s = this.sessions.get(k);
+      if (s) this.armSubmitWatch(boardId, nodeId);
+    }
+
+    const ctx = this.orchestraContext(boardId, nodeId);
+    // Server-side handoff nudge is Hermes-only: pi's extension enforces explicit
+    // intent itself (enforceIntent at agent_end). A final-capable node is free to
+    // end, so nothing to nudge either.
+    if (!ctx || ctx.canBeFinal || this.nodeRuntime(boardId, nodeId) !== "hermes") {
+      return { ok: true };
+    }
     if (handoffCalledThisTurn) {
       this.turnEndedRetries.delete(k);
       return { ok: true };
@@ -599,7 +768,7 @@ export class PtyHub {
       this.waitingInjects.delete(k);
       // Give the TUI a beat to mount its input line before the first paste.
       setTimeout(() => {
-        for (const msg of queued) s.runtime.inject(msg);
+        for (const msg of queued) this.injectAndWatch(boardId, nodeId, msg);
       }, READY_SETTLE_MS);
     }
   }
@@ -613,7 +782,8 @@ export class PtyHub {
    * Ensure the node is running, then inject once its agent is ready. If the node
    * has already reported ready the inject fires immediately; otherwise it is
    * queued and flushed by markReady (or a conservative fallback timeout, so a
-   * task is never dropped even if the extension never reports ready).
+   * task is never dropped even if the extension never reports ready). All injects
+   * go through `injectAndWatch`, which arms a closed-loop delivery watch.
    */
   private scheduleInject(boardId: string, nodeId: string, message: string): void {
     this.ensure(boardId, nodeId, 80, 24);
@@ -627,7 +797,7 @@ export class PtyHub {
       return;
     }
     if (this.ready.has(k)) {
-      s.runtime.inject(message);
+      this.injectAndWatch(boardId, nodeId, message);
       return;
     }
     // Not ready yet → queue; flushed on markReady or on the fallback timeout.
@@ -639,7 +809,7 @@ export class PtyHub {
       const pending = this.waitingInjects.get(k);
       if (!pending || pending.length === 0) return;
       this.waitingInjects.delete(k);
-      for (const msg of pending) this.sessions.get(k)?.runtime.inject(msg);
+      for (const msg of pending) this.injectAndWatch(boardId, nodeId, msg);
     }, READY_FALLBACK_MS);
   }
 
@@ -673,6 +843,7 @@ export class PtyHub {
     this.sessions.delete(k);
     this.ready.delete(k);
     this.waitingInjects.delete(k);
+    this.clearSubmitState(k);
     try {
       s.runtime.kill();
     } catch (err) {

@@ -69,7 +69,8 @@ self-loops, non-final nodes must have outgoing edges). Persists to SQLite.
 
 - `/api/v1/orchestra/*` — REST API for boards, graphs, nodes, edges, flows
 - `/internal/*` — callbacks from pi extension and Hermes plugin
-- `/internal/turn-ended` — Hermes watchdog signal (non-final node finished without handoff → nudge)
+- `/internal/turn-started` — closed-loop submit confirmation (agent began a turn → disarms the submit watch, marks node busy)
+- `/internal/turn-ended` — agent finished a turn (marks node idle, arms parked submit watches; Hermes-only: non-final node finished without handoff → nudge)
 - `/ws` — WebSocket for live UI sync (pty_output, node_status, handoff events)
 
 ## Node runtime selection
@@ -110,13 +111,36 @@ identical regardless of runtime.
 
 Ensures non-final nodes always hand off:
 
-**pi**: extension's `before_agent_start` checks if the last turn ended without
+**pi**: extension's `agent_end` checks if the turn ended without
 handoff → re-prompts via `sendUserMessage` (max retries, then `handoff-failed`).
 
 **Hermes**: `post_llm_call` hook → `POST /internal/turn-ended`, handled by
 `PtyHub.handleTurnEnded` (owns the per-node retry count). If non-final and no
 handoff, it injects a nudge into the PTY (up to `MAX_TURN_ENDED_RETRIES`, 3),
 then reports the node as errored.
+
+## Closed-loop submit confirmation (plan B)
+
+After injecting a task (bracketed-paste + `\r`) the backend can't observe whether
+the runtime's input line actually submitted it — a timing/async race can leave the
+message sitting in the prompt, never sent (the pipeline then stalls silently).
+So the loop is closed on the *outcome*: the recipient starting a turn proves the
+message reached the model.
+
+- Both runtimes POST `/internal/turn-started` once per turn (pi:
+  `before_agent_start`; Hermes: `pre_llm_call`, gated once per turn).
+- `PtyHub.injectAndWatch` arms a submit watch when the `\r` is written;
+  `handleTurnStarted` disarms it (confirmed) and marks the node busy.
+- If the watch fires (`SUBMIT_CONFIRM_MS`, 1.5s) with no confirmation, it re-sends
+  just `\r` (the paste is already in the buffer — never re-pasted, so no text
+  duplication) and retries up to `MAX_SUBMIT_RETRIES` (3), then surfaces a
+  "delivery may be stuck" error.
+- An inject that lands while a node is busy parks its watch (`pendingArm`) and
+  arms it when the turn ends, so it can't false-alarm mid-turn.
+
+This acts on the real outcome (a turn started) rather than a time estimate, so it
+covers every paste/submit race regardless of its true cause — and is
+runtime-agnostic (works for pi, Hermes, and a future `acp` runtime).
 
 ## Data flow
 

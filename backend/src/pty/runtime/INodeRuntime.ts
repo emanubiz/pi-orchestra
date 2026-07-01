@@ -16,8 +16,10 @@ export interface RuntimeSpawnConfig {
 export interface INodeRuntime {
   spawn(config: RuntimeSpawnConfig): void;
   write(data: string): void;
-  /** Bracketed-paste inject + settle + submit. */
-  inject(message: string): void;
+  /** Bracketed-paste inject + settle + submit. `onSubmitSent` fires right
+   *  after the submit `\r` is written, so the caller can arm a closed-loop
+   *  delivery watch (confirm the recipient started a turn; re-send `\r` if not). */
+  inject(message: string, onSubmitSent?: () => void): void;
   resize(cols: number, rows: number): void;
   kill(): void;
   /** External ready signal (agent's extension reported session_start). */

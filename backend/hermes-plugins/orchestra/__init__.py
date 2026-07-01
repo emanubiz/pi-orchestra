@@ -14,9 +14,12 @@ convention — a purely textual protocol can't break on a tool-schema mismatch.
 
 Lifecycle:
   on_session_start    → POST /internal/ready              (mark node as booted)
-  pre_llm_call        → GET  /internal/orchestra-context  (per-turn appendix)
+  pre_llm_call        → POST /internal/turn-started        (closed-loop submit confirm;
+                                                         once per turn, then) GET
+                                                        /internal/orchestra-context
+                                                        (per-turn appendix)
   transform_llm_output→ parse @@HANDOFF/@@CARD, deliver, strip sentinels
-  post_llm_call       → POST /internal/turn-ended         (watchdog signal)
+  post_llm_call       → POST /internal/turn-ended         (idle + watchdog signal)
 """
 
 import os
@@ -94,6 +97,12 @@ _node = ""
 # session is a single node processing turns sequentially, so a plain flag is
 # enough and can't drift between hooks.
 _handoff_called_this_turn = False
+# Whether /internal/turn-started has been signalled for the current turn. Hermes'
+# tool loop fires pre_llm_call once per model call inside a single turn, so
+# without this guard the backend would mark the node busy/disarm the submit
+# watch repeatedly (harmless) and, worse, a second turn-started after the turn
+# had already ended would re-mark it busy. Reset in post_llm_call.
+_turn_started_this_turn = False
 
 
 # ── Sentinel parsing / delivery ───────────────────────────────────────────────
@@ -181,7 +190,22 @@ def register(ctx: Any) -> None:
             log.warning("orchestra: /internal/ready failed: %s", e)
 
     def pre_llm_call(**kwargs: Any) -> dict[str, Any] | None:
-        """Inject the live orchestration appendix into the current turn."""
+        """Inject the live orchestration appendix and signal turn-started.
+
+        Hermes' tool loop calls this once per model call inside a turn, so
+        /internal/turn-started is gated by ``_turn_started_this_turn`` to fire
+        once per turn (the closed-loop confirmation that an injected task's
+        paste+submit reached the model — disarms the backend's submit watch and
+        marks the node busy). Best-effort: a backend blip must never stall the
+        agent's model call.
+        """
+        global _turn_started_this_turn
+        if not _turn_started_this_turn:
+            _turn_started_this_turn = True
+            try:
+                _post("/internal/turn-started", {"boardId": _board, "nodeId": _node})
+            except Exception as e:
+                log.warning("orchestra: /internal/turn-started failed: %s", e)
         try:
             orchestra_ctx = _get(
                 f"/internal/orchestra-context?boardId={_board}&nodeId={_node}"
@@ -225,10 +249,11 @@ def register(ctx: Any) -> None:
         return cleaned or "🤝 …"
 
     def post_llm_call(**kwargs: Any) -> None:
-        """Signal end-of-turn so the watchdog can nudge if needed."""
-        global _handoff_called_this_turn
+        """Signal end-of-turn so the backend can mark the node idle and nudge if needed."""
+        global _handoff_called_this_turn, _turn_started_this_turn
         handoff_called = _handoff_called_this_turn
         _handoff_called_this_turn = False
+        _turn_started_this_turn = False
         try:
             _post(
                 "/internal/turn-ended",

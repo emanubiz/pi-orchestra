@@ -8,10 +8,14 @@
  *     /internal/orchestra-context. Replaces the old approach of typing a
  *     "connection update" into the PTY, which pi mistook for a new user task.
  *     Falls back to a spawn-time baked appendix if the backend is unreachable.
+ *     Also POSTs /internal/turn-started — the closed-loop confirmation that an
+ *     injected task's paste+submit reached the model (disarms the backend's
+ *     submit watch and marks the node busy).
  *
  *  2. agent_end → the agent has finished its whole response (the agent loop is
- *     over, it is now awaiting input). This is where intent is REQUIRED to be
- *     EXPLICIT, never inferred from prose:
+ *     over, it is now awaiting input). POSTs /internal/turn-ended so the backend
+ *     marks the node idle (and arms any submit watch parked while it was busy).
+ *     This is also where intent is REQUIRED to be EXPLICIT, never inferred:
  *       - one or more @@HANDOFF:<handle> … @@END  → delegate downstream, or
  *       - @@DONE                                   → end the chain here.
  *     If a *pipeline* node (non-final, or final-but-with-outgoing-edges) ends
@@ -303,6 +307,12 @@ export default function handoffExtension(pi: ExtensionAPI) {
     // our own confirm keeps the counter so the retry cap engages.
     if (!prompt.includes(CONFIRM_TAG)) confirmAttempts = 0;
 
+    // Turn-started: the closed-loop confirmation that an injected task's
+    // paste+submit reached the model. Best-effort, but retried a few times: if
+    // it's lost the backend's submit watch will eventually re-send `\r` and
+    // recover, so this is a fast-path, not a correctness requirement.
+    void postWithRetry(`${BASE_URL}/internal/turn-started`, { boardId: BOARD_ID, nodeId: NODE_ID }, 2, 250);
+
     loopCtx = await fetchCtx();
     const appendix = loopCtx?.appendix ?? FALLBACK;
     const base = (event as { systemPrompt?: string }).systemPrompt ?? "";
@@ -313,10 +323,25 @@ export default function handoffExtension(pi: ExtensionAPI) {
   pi.on("agent_end", async (event) => {
     const messages = ((event as { messages?: unknown[] }).messages ?? []) as unknown[];
     const text = lastAssistantText(messages);
-    if (!text) return;
 
     await deliverCards(text);
-    const delivered = await deliverHandoffs(text);
+    const delivered = text ? await deliverHandoffs(text) : 0;
+
+    // Turn-ended: marks the node idle and arms any submit watch that was parked
+    // while the node was busy (an inject that landed mid-turn). The server-side
+    // handoff nudge is Hermes-only, so for pi this is purely the busy/idle +
+    // submit-confirmation transition. handoffCalledThisTurn is reported so the
+    // backend has the same signal pi's own client-side watchdog uses.
+    // Retried: a lost turn-ended leaves the node permanently busy → every later
+    // inject parks in pendingArm and never arms → a silent pipeline stall.
+    void postWithRetry(
+      `${BASE_URL}/internal/turn-ended`,
+      { boardId: BOARD_ID, nodeId: NODE_ID, handoffCalledThisTurn: delivered >= 1 },
+      3,
+      250,
+    );
+
+    if (!text) return;
     await enforceIntent(pi, delivered, hasExplicitDone(text));
   });
 }
