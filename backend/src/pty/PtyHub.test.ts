@@ -789,6 +789,61 @@ describe("PtyHub", () => {
     });
   });
 
+  // ── ClaudeRuntime (PINODES_ORCHESTRA_CLAUDE enabled) ──────────────────────
+
+  describe("with Claude enabled", () => {
+    beforeEach(() => {
+      process.env.PINODES_ORCHESTRA_CLAUDE = "true";
+    });
+
+    afterEach(() => {
+      delete process.env.PINODES_ORCHESTRA_CLAUDE;
+    });
+
+    it("spawns a claude node with hook settings and appended system prompt", () => {
+      hub.setGraph(BOARD, graphOf({ edges: true, n1Runtime: "claude" }), "/tmp");
+      hub.ensure(BOARD, "n1", 80, 24);
+
+      const call = lastSpawnFor("n1")!;
+      expect(call).toBeDefined();
+      expect(call.args).toContain("--append-system-prompt");
+      expect(call.args).toContain("--settings");
+      expect(call.args).toContain("--allowedTools");
+      expect(call.args).not.toContain("--tui");
+      expect(call.args).not.toContain("--extension");
+      const env = call.opts.env as Record<string, string>;
+      expect(env.PINODES_ORCHESTRA_NODE).toBe("n1");
+    });
+
+    it("falls back to pi when claude is not available", () => {
+      process.env.PINODES_ORCHESTRA_CLAUDE = "false";
+      hub.setGraph(BOARD, graphOf({ edges: true, n1Runtime: "claude" }), "/tmp");
+      hub.ensure(BOARD, "n1", 80, 24);
+
+      const call = lastSpawnFor("n1")!;
+      expect(call.args).toContain("--system-prompt"); // pi args
+      expect(call.args).not.toContain("--append-system-prompt");
+    });
+
+    it("handleTurnEnded nudges a non-final claude node server-side (like hermes)", () => {
+      hub.setGraph(
+        BOARD,
+        graphOf({ edges: true, n1Runtime: "claude", n1Final: false }),
+        "/tmp",
+      );
+      hub.ensure(BOARD, "n1", 80, 24);
+      hub.markReady(BOARD, "n1");
+      const inst = ptyFor("n1")!;
+
+      const r1 = hub.handleTurnEnded(BOARD, "n1", false);
+      expect(r1).toEqual({ ok: true, retries: 1 });
+      expect(inst.writes.join("")).toContain("Attempt 1/3");
+
+      // A handoff clears the retry counter, same contract as hermes.
+      expect(hub.handleTurnEnded(BOARD, "n1", true)).toEqual({ ok: true });
+    });
+  });
+
   // ── Closed-loop submit confirmation (plan B) ────────────────────────────────
   // The watch is armed when the submit `\r` is written (after the paste→submit
   // delay), disarmed by turn-started, and re-sends `\r` on timeout. Timing:

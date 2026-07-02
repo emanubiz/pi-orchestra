@@ -19,7 +19,27 @@ describe("RuntimeSelector", () => {
       <RuntimeSelector value="hermes" hermesAvailable={false} onChange={vi.fn()} />,
     );
 
-    expect(screen.getByTitle(/Hermes CLI was not found/i)).toBeTruthy();
+    expect(screen.getByTitle(/CLI was not found/i)).toBeTruthy();
+    expect(screen.getByText("⚠")).toBeTruthy();
+  });
+
+  it("offers claude and calls onChange with it", () => {
+    const onChange = vi.fn();
+    render(<RuntimeSelector value="pi" onChange={onChange} />);
+
+    act(() => {
+      screen.getByRole("button", { name: "claude" }).click();
+    });
+
+    expect(onChange).toHaveBeenCalledWith("claude");
+  });
+
+  it("shows a warning affordance when claude is selected but unavailable", () => {
+    render(
+      <RuntimeSelector value="claude" claudeAvailable={false} onChange={vi.fn()} />,
+    );
+
+    expect(screen.getByTitle(/CLI was not found/i)).toBeTruthy();
     expect(screen.getByText("⚠")).toBeTruthy();
   });
 });

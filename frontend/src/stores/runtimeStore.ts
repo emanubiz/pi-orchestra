@@ -21,9 +21,12 @@ interface RuntimeState {
   runPromptDraft: string;
   /** Whether the backend can spawn Hermes (`hermes` on PATH). null until known. */
   hermesAvailable: boolean | null;
+  /** Whether the backend can spawn Claude Code (`claude` on PATH). null until known. */
+  claudeAvailable: boolean | null;
 
   setConnected: (v: boolean) => void;
   setHermesAvailable: (v: boolean) => void;
+  setClaudeAvailable: (v: boolean) => void;
   setEnforcement: (boardId: string, nodeId: string, enabled: boolean) => void;
   setActiveBoardId: (boardId: string) => void;
   setSelectedNodeId: (id: string | null) => void;
@@ -52,9 +55,11 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
   prompts: [],
   runPromptDraft: "",
   hermesAvailable: null,
+  claudeAvailable: null,
 
   setConnected: (v) => set({ connected: v }),
   setHermesAvailable: (v) => set({ hermesAvailable: v }),
+  setClaudeAvailable: (v) => set({ claudeAvailable: v }),
   setEnforcement: (boardId, nodeId, enabled) =>
     set((s) => ({ enforcement: { ...s.enforcement, [nodeKey(boardId, nodeId)]: enabled } })),
   setActiveBoardId: (boardId) =>

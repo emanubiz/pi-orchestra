@@ -374,17 +374,18 @@ ws.onopen = () => {
 
 ## Node runtime field (implemented)
 
-`runtime?: "pi" | "hermes"` and `runtimeConfig?: Record<string, unknown>`.
-Hermes is auto-detected when the `hermes` CLI is on the backend PATH (see
-[HERMES_RUNTIME.md](./HERMES_RUNTIME.md)). Optional `PINODES_ORCHESTRA_HERMES=false`
-disables it; `true` forces it on.
+`runtime?: "pi" | "hermes" | "claude"` and `runtimeConfig?: Record<string, unknown>`.
+Hermes and Claude Code are auto-detected when their CLIs are on the backend PATH
+(see [HERMES_RUNTIME.md](./HERMES_RUNTIME.md), [CLAUDE_RUNTIME.md](./CLAUDE_RUNTIME.md)).
+Optional `PINODES_ORCHESTRA_HERMES` / `PINODES_ORCHESTRA_CLAUDE` (`false` disables,
+`true` forces on).
 
 In the **web UI**, runtime is set when creating a node (`POST` equivalent via the add-agent
 flow) and is not editable afterward. The REST API still accepts `runtime` on `PATCH` for
 programmatic updates (restarting the PTY is the caller's responsibility).
 
-**Validation (400):** `runtime` must be one of `pi` | `hermes` (unknown values
-are rejected, not silently persisted); `runtimeConfig` must be a plain object;
+**Validation (400):** `runtime` must be one of `pi` | `hermes` | `claude` (unknown
+values are rejected, not silently persisted); `runtimeConfig` must be a plain object;
 on `PATCH`, `label`/`promptId` must be non-empty strings, `position` must be
 `{ x: number, y: number }`, and `canBeFinal` a boolean.
 
@@ -406,8 +407,9 @@ interface WorkflowNode {
 | runtime | spawn |
 |---------|-------|
 | `pi` (default) | `pi` CLI via PtyHub → PiRuntime |
-| `hermes` | `hermes --tui` via PtyHub → HermesRuntime (feature flag) |
-| `cursor` | planned |
+| `hermes` | `hermes --tui` via PtyHub → HermesRuntime (auto-detected) |
+| `claude` | `claude` via PtyHub → ClaudeRuntime (auto-detected) |
+| `cursor` | deferred (feasibility study) |
 | `openclaw` | planned |
 
 ---
