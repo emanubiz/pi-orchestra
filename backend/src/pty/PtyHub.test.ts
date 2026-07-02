@@ -965,4 +965,67 @@ describe("PtyHub", () => {
       expect(inst.writes.length).toBe(writesBefore);
     });
   });
+
+  describe("Codex structured runtime", () => {
+    beforeEach(() => {
+      process.env.PINODES_ORCHESTRA_CODEX = "false";
+    });
+
+    afterEach(() => {
+      delete process.env.PINODES_ORCHESTRA_CODEX;
+    });
+
+    it("does not broadcast running after synchronous spawn failure (Codex unavailable)", () => {
+      const broadcasts: Array<Record<string, unknown>> = [];
+      hub.setBroadcast((msg) => broadcasts.push(msg));
+      hub.setGraph(
+        BOARD,
+        {
+          ...graphOf({ edges: true, n1Runtime: "codex" }),
+          nodes: [
+            {
+              id: "n1",
+              label: "Developer",
+              promptId: "p1",
+              runtime: "codex",
+              canBeFinal: false,
+              position: { x: 0, y: 0 },
+            },
+            {
+              id: "n2",
+              label: "Reviewer",
+              promptId: "p2",
+              position: { x: 1, y: 0 },
+            },
+          ],
+        },
+        "/tmp",
+      );
+
+      hub.ensure(BOARD, "n1", 80, 24);
+
+      expect(hub.isNodeRunning(BOARD, "n1")).toBe(false);
+      expect(broadcasts).toContainEqual(
+        expect.objectContaining({
+          type: "pty_output",
+          boardId: BOARD,
+          nodeId: "n1",
+          data: expect.stringContaining("CLI not found"),
+        }),
+      );
+      expect(broadcasts).toContainEqual({
+        type: "node_status",
+        boardId: BOARD,
+        nodeId: "n1",
+        status: "idle",
+      });
+      expect(broadcasts).not.toContainEqual({
+        type: "node_status",
+        boardId: BOARD,
+        nodeId: "n1",
+        status: "running",
+      });
+      expect(spawnCalls).toHaveLength(0);
+    });
+  });
 });

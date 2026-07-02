@@ -479,6 +479,10 @@ export class PtyHub {
       },
     });
 
+    // Structured runtimes (e.g. Codex) may call onExit synchronously during
+    // spawn when unavailable — do not broadcast "running" after the session ended.
+    if (!this.sessions.has(k)) return;
+
     this.broadcast({ type: "node_status", boardId, nodeId, status: "running" });
     // Tell read-only mirrors the PTY's real size so they can render pi's
     // absolute-cursor output faithfully (and scale it down) instead of fitting

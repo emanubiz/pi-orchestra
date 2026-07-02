@@ -155,15 +155,17 @@ export class CodexRuntime implements INodeRuntime {
 
   write(data: string): void {
     if (!this._running || !this.config) return;
+    const trimmed = data.trim();
+    if (!trimmed) return;
     if (this.turnRunning) {
       this.config.onOutput(
         "\x1b[33m[codex] Turn in progress — submit a follow-up via inject, not raw terminal input.\x1b[0m\n",
       );
       return;
     }
-    const trimmed = data.trim();
-    if (!trimmed) return;
-    this.inject(trimmed);
+    this.config.onOutput(
+      "\x1b[33m[codex] Keyboard input ignored — use Run or inject to send tasks.\x1b[0m\n",
+    );
   }
 
   inject(message: string, onSubmitSent?: () => void): void {

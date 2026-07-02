@@ -183,6 +183,18 @@ describe("CodexRuntime", () => {
     expect(rt.isRunning()).toBe(false);
   });
 
+  it("write ignores keyboard input (structured runtime uses inject only)", () => {
+    const config = baseConfig();
+    const rt = new CodexRuntime();
+    rt.spawn(config);
+    rt.write("typed from keyboard\n");
+
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(config.onOutput).toHaveBeenCalledWith(
+      expect.stringContaining("Keyboard input ignored"),
+    );
+  });
+
   it("resize is a no-op but size() returns last dimensions", () => {
     const rt = new CodexRuntime();
     rt.spawn(baseConfig({ cols: 100, rows: 40 }));
