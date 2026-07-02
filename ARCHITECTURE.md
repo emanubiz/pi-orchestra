@@ -18,13 +18,14 @@ live terminal backed by a real AI agent process (pi or hermes) in a PTY.
                                           │  (runtime-agnostic)│
                                           └────────┬───────────┘
                                                    │
-                              ┌────────────────────┼────────────────────┐
-                              │                    │                    │
-                     ┌────────┴────────┐  ┌───────┴────────┐  ┌────────┴────────┐
-                     │   PiRuntime     │  │ HermesRuntime  │  │  ClaudeRuntime  │
-                     │  (pi CLI + PTY) │  │(hermes --tui    │  │ (claude + PTY   │
-                     │  + call-agent   │  │  + PTY + plugin)│  │  + hook bridge) │
-                     └─────────────────┘  └────────────────┘  └─────────────────┘
+                     ┌─────────────────────────────┼─────────────────────────────┐
+                     │                             │                             │
+            ┌────────┴────────┐  ┌────────────────┴─────────┐  ┌────────────────┴────────┐
+            │   PiRuntime     │  │     HermesRuntime        │  │    ClaudeRuntime        │
+            │  (pi CLI + PTY) │  │  (hermes --tui + PTY     │  │  (claude + PTY          │
+            │  + call-agent   │  │   + orchestra plugin)    │  │   + --settings hook     │
+            │                 │  │                          │  │     bridge)              │
+            └─────────────────┘  └──────────────────────────┘  └─────────────────────────┘
 ```
 
 ## Backend layers

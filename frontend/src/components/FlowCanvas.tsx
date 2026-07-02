@@ -13,7 +13,9 @@ import {
   type Edge,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Plus } from "lucide-react";
+import { Plus, Workflow } from "lucide-react";
+import { WORKFLOW_TEMPLATES } from "../lib/workflowTemplates";
+import type { WorkflowTemplate } from "../lib/workflowTemplates";
 import { AgentNode } from "./AgentNode";
 import { useRuntimeStore } from "../stores/runtimeStore";
 import { TerminalContext } from "../lib/termTheme";
@@ -55,6 +57,7 @@ interface FlowCanvasProps {
   onExpand: (nodeId: string) => void;
   onEditPrompt: (nodeId: string) => void;
   onAddAgent?: () => void;
+  onLoadTemplate?: (template: WorkflowTemplate) => void;
 }
 
 function snapshotToFlow(
@@ -91,6 +94,7 @@ export function FlowCanvas({
   onExpand,
   onEditPrompt,
   onAddAgent,
+  onLoadTemplate,
 }: FlowCanvasProps) {
   const initial = useMemo(
     () => snapshotToFlow(initialSnapshot, entryNodeId),
@@ -275,20 +279,48 @@ export function FlowCanvas({
         proOptions={{ hideAttribution: true }}
       >
         {nodes.length === 0 && (
-          <Panel position="top-center" className="mt-20">
-            <div className="rounded-lg border border-zinc-800/80 bg-zinc-900/90 px-5 py-4 text-center shadow-lg">
-              <p className="text-sm text-zinc-400">Add your first agent</p>
-              <p className="mt-1 text-xs text-zinc-600">Pick a prompt, choose runtime, then connect nodes</p>
-              {onAddAgent && (
-                <button
-                  type="button"
-                  onClick={onAddAgent}
-                  className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-xs font-medium text-zinc-200 transition-colors hover:bg-white/10 hover:border-white/20 active:scale-[0.98]"
-                >
-                  <Plus size={14} strokeWidth={2} />
-                  Add agent
-                </button>
-              )}
+          <Panel position="top-center" className="mt-8 w-full max-w-2xl mx-auto px-4">
+            <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/95 p-6 shadow-2xl shadow-black/40 backdrop-blur-md">
+              <div className="text-center mb-5">
+                <h2 className="text-sm font-semibold text-zinc-200">Start a workflow</h2>
+                <p className="mt-1 text-xs text-zinc-500">Pick a template for instant setup, or add agents manually.</p>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 mb-5">
+                {WORKFLOW_TEMPLATES.map((tpl) => (
+                  <button
+                    key={tpl.id}
+                    type="button"
+                    onClick={() => onLoadTemplate?.(tpl)}
+                    className="group flex flex-col items-start gap-1.5 rounded-lg border border-white/[0.06] bg-white/[0.02] p-3 text-left transition-all hover:border-violet-500/30 hover:bg-violet-500/[0.06] active:scale-[0.98]"
+                  >
+                    <span className="text-lg leading-none">{tpl.icon}</span>
+                    <span className="text-[11px] font-medium text-zinc-200 leading-tight group-hover:text-violet-200 transition-colors">
+                      {tpl.name}
+                    </span>
+                    <span className="text-[10px] text-zinc-500 leading-snug line-clamp-2">
+                      {tpl.description}
+                    </span>
+                    <span className="mt-auto inline-flex items-center gap-1 text-[9px] font-medium uppercase tracking-wider text-zinc-600 group-hover:text-violet-400/70 transition-colors">
+                      <Workflow size={10} strokeWidth={2} />
+                      {tpl.graph.nodes.length} nodes
+                    </span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex items-center justify-center gap-3">
+                {onAddAgent && (
+                  <button
+                    type="button"
+                    onClick={onAddAgent}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-xs font-medium text-zinc-200 transition-colors hover:bg-white/10 hover:border-white/20 active:scale-[0.98]"
+                  >
+                    <Plus size={14} strokeWidth={2} />
+                    Add agent manually
+                  </button>
+                )}
+              </div>
             </div>
           </Panel>
         )}

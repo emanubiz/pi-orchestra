@@ -110,8 +110,8 @@ Details: [`vscode-extension/README.md`](./vscode-extension/README.md),
 | `PINODES_ORCHESTRA_DATA_DIR` | SQLite location |
 | `PINODES_ORCHESTRA_TOKEN` | Optional shared secret for all API/internal routes and WebSocket handshakes (except `/api/health`) |
 | `PINODES_ORCHESTRA_HERMES` | *(auto)* | Optional override: `false` disables Hermes; `true` forces it on. Default: detect `hermes` on backend PATH |
-| `PINODES_ORCHESTRA_CLAUDE` | *(auto)* | Optional override for Claude Code runtime availability |
-| `PINODES_ORCHESTRA_CODEX` | *(auto)* | Optional override for Codex structured runtime availability |
+| `PINODES_ORCHESTRA_CLAUDE` | *(auto)* | Optional override: `false` disables Claude Code; `true` forces it on. Default: detect `claude` on backend PATH |
+| `PINODES_ORCHESTRA_CODEX` | *(auto)* | Optional override: `false` disables Codex; `true` forces it on. Default: detect `codex` on backend PATH |
 | `VITE_API_BASE` | Custom backend URL at frontend build time |
 
 Two additional variables are set automatically by hosts and rarely need manual
@@ -130,7 +130,9 @@ When `PINODES_ORCHESTRA_TOKEN` is set, browser clients must provide it. The VS C
 |-----|----------|
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | System design, runtimes, WS protocol, handoff |
 | [docs/guides/HERMES_RUNTIME.md](./docs/guides/HERMES_RUNTIME.md) | Hermes nodes — setup, UI, flags |
+| [docs/guides/CLAUDE_RUNTIME.md](./docs/guides/CLAUDE_RUNTIME.md) | Claude Code nodes — setup, hooks, flags |
 | [docs/guides/CODEX_RUNTIME.md](./docs/guides/CODEX_RUNTIME.md) | Codex structured nodes — setup, config, smoke |
+| [docs/guides/HERMES_CONTROL_PLANE.md](./docs/guides/HERMES_CONTROL_PLANE.md) | MCP server for Hermes control-plane access |
 | [docs/guides/SECURITY.md](./docs/guides/SECURITY.md) | Threat model, controls, configuration |
 | [docs/roadmaps/EXTENSIONS_ROADMAP.md](./docs/roadmaps/EXTENSIONS_ROADMAP.md) | Host integrations & runtime roadmap |
 | [docs/guides/PROGRAMMATIC_API.md](./docs/guides/PROGRAMMATIC_API.md) | REST/CLI API for boards, flows, auth |

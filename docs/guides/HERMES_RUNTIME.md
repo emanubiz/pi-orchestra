@@ -10,13 +10,14 @@ How to run **Hermes TUI** agents on Orchestra nodes alongside **pi**.
 Each graph node has an optional `runtime` field:
 
 ```typescript
-runtime?: "pi" | "hermes" | "claude";  // absent === "pi"
+runtime?: "pi" | "hermes" | "claude" | "codex";  // absent === "pi"
 runtimeConfig?: { toolset?: string };  // non-secret; persisted in SQLite
 ```
 
 - **pi** — `pi` CLI + `call-agent.ts` extension (default)
 - **hermes** — `hermes --tui` in a PTY + `orchestra` plugin for handoff/watchdog
 - **claude** — see [CLAUDE_RUNTIME.md](./CLAUDE_RUNTIME.md)
+- **codex** — see [CODEX_RUNTIME.md](./CODEX_RUNTIME.md)
 
 Mixed graphs (e.g. Architect on pi → Developer on Hermes) are supported.
 
@@ -75,18 +76,18 @@ If Hermes is selected but the CLI is not on the backend PATH, the runtime step s
 
 ## How it works
 
-| Concern | pi | Hermes |
-|---------|----|--------|
-| Spawn | `pi --tools … --extension call-agent.ts` | `hermes chat --tui -t …` |
-| System prompt | `--system-prompt` + per-turn refresh via extension | `HERMES_EPHEMERAL_SYSTEM_PROMPT` env |
-| Per-turn appendix (recipients, finality, kanban) | Refreshed into **system prompt** (`before_agent_start`) | Appended to **user message** via `pre_llm_call` — same info for the model, different slot |
-| Handoff expression | `@@HANDOFF:handle … @@END` text block | **Same** `@@HANDOFF` text block |
-| Where it's parsed | Extension on `agent_end` | Plugin `transform_llm_output` hook (also strips the block from the shown output) |
-| Delivery to target node | `POST /internal/call-agent` → inject PTY + closed-loop submit watch | Same |
-| Turn-started (submit confirmed) | `before_agent_start` → `POST /internal/turn-started` | `pre_llm_call` → `POST /internal/turn-started` (once per turn) |
-| Turn-ended (node idle) | `agent_end` → `POST /internal/turn-ended` | `post_llm_call` → `POST /internal/turn-ended` |
-| Watchdog (non-final node must hand off) | Extension `agent_end` (client-side `enforceIntent`) | Plugin → `POST /internal/turn-ended` → `PtyHub.handleTurnEnded` (server-side nudge) |
-| Terminal rendering | xterm.js (ANSI) | xterm.js (identical) |
+| Concern | pi | Hermes | Claude Code |
+|---------|----|--------|-------------|
+| Spawn | `pi --tools … --extension call-agent.ts` | `hermes chat --tui -t …` | `claude --append-system-prompt … --settings <hooks>` |
+| System prompt | `--system-prompt` + per-turn refresh via extension | `HERMES_EPHEMERAL_SYSTEM_PROMPT` env | `--append-system-prompt` + per-turn `additionalContext` |
+| Per-turn appendix (recipients, finality, kanban) | Refreshed into **system prompt** (`before_agent_start`) | Appended to **user message** via `pre_llm_call` — same info for the model, different slot | Emitted as `additionalContext` via `UserPromptSubmit` hook |
+| Handoff expression | `@@HANDOFF:handle … @@END` text block | **Same** `@@HANDOFF` text block | **Same** `@@HANDOFF` text block |
+| Where it's parsed | Extension on `agent_end` | Plugin `transform_llm_output` hook (also strips the block from the shown output) | Hook bridge `orchestra-hook.mjs` at `Stop` (sentinels stay visible, as with pi) |
+| Delivery to target node | `POST /internal/call-agent` → inject PTY + closed-loop submit watch | Same | Same |
+| Turn-started (submit confirmed) | `before_agent_start` → `POST /internal/turn-started` | `pre_llm_call` → `POST /internal/turn-started` (once per turn) | `UserPromptSubmit` → `POST /internal/turn-started` |
+| Turn-ended (node idle) | `agent_end` → `POST /internal/turn-ended` | `post_llm_call` → `POST /internal/turn-ended` | `Stop` → `POST /internal/turn-ended` |
+| Watchdog (non-final node must hand off) | Extension `agent_end` (client-side `enforceIntent`) | Plugin → `POST /internal/turn-ended` → `PtyHub.handleTurnEnded` (server-side nudge) | Hook bridge → same server-side nudge (`SERVER_NUDGED_RUNTIMES`) |
+| Terminal rendering | xterm.js (ANSI) | xterm.js (identical) | xterm.js (identical) |
 
 ## Toolset override
 

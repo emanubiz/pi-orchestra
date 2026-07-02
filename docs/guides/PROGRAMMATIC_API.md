@@ -395,7 +395,7 @@ silently ignored, so the shape can grow without a migration):
 
 | Field | Type | Effect | Runtimes |
 |---|---|---|---|
-| `toolset` | `string` | Overrides the default tool list passed as `--tools`/`-t`. **Runtime-specific vocabularies:** pi uses `read,bash,edit,write,grep` (default); Hermes uses its own toolset names (`file,terminal,web,…` — see `hermes tools list`, default `file,terminal`). Ignored if blank or not a string — falls back to that runtime's default. | pi, hermes |
+| `toolset` | `string` | Overrides the default tool list passed as `--tools`/`-t`/`--allowedTools`. **Runtime-specific vocabularies:** pi uses `read,bash,edit,write,grep` (default); Hermes uses its own toolset names (`file,terminal,web,…` — see `hermes tools list`, default `file,terminal`); Claude Code uses capitalized tool names (`Read,Edit,Write,Bash,Grep,Glob` — default `Read,Edit,Write,Bash,Grep,Glob`). Ignored if blank or not a string — falls back to that runtime's default. | pi, hermes, claude |
 | `model` | `string` | Codex model id (`-m`) | codex |
 | `sandbox` | `string` | Codex sandbox policy: `read-only`, `workspace-write`, `danger-full-access` | codex |
 | `approvalMode` | `string` | Codex approval mode: `untrusted`, `on-request`, `never` | codex |

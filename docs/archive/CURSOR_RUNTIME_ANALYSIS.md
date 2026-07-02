@@ -11,7 +11,7 @@
 > Companion docs:
 > [`ARCHITECTURE.md`](../../ARCHITECTURE.md) (runtime model),
 > [`roadmaps/EXTENSIONS_ROADMAP.md`](../roadmaps/EXTENSIONS_ROADMAP.md) (sequencing),
-> [`plans/CLAUDE_CODE_RUNTIME_PLAN.md`](./CLAUDE_CODE_RUNTIME_PLAN.md) (preferred next runtime),
+> [`CLAUDE_CODE_RUNTIME_PLAN.md`](./CLAUDE_CODE_RUNTIME_PLAN.md) (preferred next runtime),
 > [`guides/HERMES_RUNTIME.md`](../guides/HERMES_RUNTIME.md) (reference implementation).
 
 **Date:** 2026-07-01  

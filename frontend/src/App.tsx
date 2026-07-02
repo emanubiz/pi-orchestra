@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Columns3, Network, PanelRight, Save, Square } from "lucide-react";
+import { Columns3, Network, PanelRight, Save, Square, Download, Upload } from "lucide-react";
 import type { Node, Edge } from "@xyflow/react";
 import { BoardTabs } from "./components/BoardTabs";
 import { FlowCanvas, flowToSnapshot, type FlowCanvasHandle } from "./components/FlowCanvas";
@@ -17,6 +17,7 @@ import { useBoardStore } from "./stores/boardStore";
 import { graphFromFlow, useRuntimeStore } from "./stores/runtimeStore";
 import { apiFetch } from "./lib/api";
 import { IS_EMBEDDED, EMBED_CWD } from "./lib/embed";
+import type { WorkflowTemplate } from "./lib/workflowTemplates";
 import type { SystemPrompt, WorkflowGraph, WorkflowNodeData } from "./types";
 
 export function App() {
@@ -242,6 +243,55 @@ export function App() {
     pushGraphToBackend(nodes, edges);
   };
 
+  const exportWorkflow = () => {
+    const nodes = flowRef.current?.getNodes() ?? [];
+    const edges = flowRef.current?.getEdges() ?? [];
+    const graph = graphFromFlow(
+      nodes,
+      edges,
+      activeBoard.workflowName,
+      activeBoard.workflowId,
+      activeBoard.cwd,
+      activeBoard.entryNodeId,
+    );
+    const blob = new Blob([JSON.stringify(graph, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${activeBoard.workflowName.replace(/[^a-z0-9]+/gi, "-").toLowerCase() || "workflow"}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importWorkflow = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json";
+    input.onchange = () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const graph = JSON.parse(reader.result as string) as WorkflowGraph;
+          if (!graph.nodes || !Array.isArray(graph.nodes)) {
+            window.alert("Invalid workflow file: missing nodes array.");
+            return;
+          }
+          loadWorkflow(graph);
+        } catch {
+          window.alert("Could not parse workflow file. Ensure it is valid JSON.");
+        }
+      };
+      reader.readAsText(file);
+    };
+    input.click();
+  };
+
+  const loadTemplate = (tpl: WorkflowTemplate) => {
+    loadWorkflow({ ...tpl.graph, cwd: activeBoard.cwd });
+  };
+
   const runFromHere = (nodeId: string, message: string) => {
     send({ type: "attach_node", nodeId });
     send({ type: "inject_task", nodeId, message });
@@ -339,6 +389,22 @@ export function App() {
             >
               <Save size={14} strokeWidth={1.75} />
             </button>
+            <button
+              type="button"
+              onClick={exportWorkflow}
+              className="toolbar-btn"
+              title="Export workflow as JSON"
+            >
+              <Download size={14} strokeWidth={1.75} />
+            </button>
+            <button
+              type="button"
+              onClick={importWorkflow}
+              className="toolbar-btn"
+              title="Import workflow from JSON"
+            >
+              <Upload size={14} strokeWidth={1.75} />
+            </button>
             <WorkflowPicker
               cwd={activeBoard.cwd}
               currentId={activeBoard.workflowId}
@@ -416,6 +482,7 @@ export function App() {
                 onExpand={setOverlayNodeId}
                 onEditPrompt={setPromptEditNodeId}
                 onAddAgent={() => setAddAgentOpen(true)}
+                onLoadTemplate={loadTemplate}
               />
             </div>
 

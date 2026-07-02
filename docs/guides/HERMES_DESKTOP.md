@@ -1,139 +1,91 @@
-# Hermes Desktop — integration analysis
+# Hermes Desktop integration
 
-Reference for embedding **pinodes-orchestra** alongside Hermes Agent surfaces.
+Operational guide for using **pinodes-orchestra** with Hermes Desktop.
 
-Sources: [Hermes Desktop docs](https://hermes-agent.nousresearch.com/docs/user-guide/desktop), [Web Dashboard](https://hermes-agent.nousresearch.com/docs/user-guide/features/web-dashboard), [Programmatic Integration](https://hermes-agent.nousresearch.com/docs/developer-guide/programmatic-integration).
+> **Implementation source of truth:** [HERMES_CONTROL_PLANE_PLAN.md](../plans/HERMES_CONTROL_PLANE_PLAN.md).
+> This guide is intentionally short. Do not duplicate the full plan here.
 
-## What Hermes Desktop is
+## Positioning
 
-Hermes Desktop is a **native Electron app** (macOS, Windows, Linux) that wraps the same Hermes Agent core used by CLI, TUI, and `hermes dashboard`. It is **not** a separate product — config, sessions, skills, and memory are shared across surfaces.
+Hermes Desktop and pinodes-orchestra are complementary:
 
+| Surface | Best at |
+|---|---|
+| **Hermes Chat/Desktop** | Conversational control, planning, tool use, approvals, memory, MCP. |
+| **pinodes-orchestra** | Visual multi-agent execution: graph canvas, live terminals, edge-gated handoffs, Kanban, Timeline. |
+
+The clean integration is:
+
+1. **MCP/control-plane first** — Hermes creates and supervises Orchestra boards via tools.
+2. **Standalone UI remains the reference** — browser/PWA works even if Desktop integration is absent.
+3. **Desktop tab later** — Hermes Desktop embeds the existing Orchestra UI as a thin iframe/webview.
+
+## Recommended user flow today
+
+Run Orchestra standalone next to Hermes Desktop:
+
+```bash
+cd /home/emanu/Scrivania/Workspace/pinodes-orchestra
+npm run dev
 ```
-┌─────────────────────────────────────────────────┐
-│  Hermes Desktop (Electron shell)                 │
-│  React renderer                                  │
-│       │                                          │
-│       ▼                                          │
-│  hermes dashboard backend (local or remote)      │
-│       │                                          │
-│       ▼                                          │
-│  Hermes Agent core (AIAgent, tools, sessions)    │
-└─────────────────────────────────────────────────┘
+
+Then open:
+
+```text
+http://127.0.0.1:5173
 ```
 
-On first launch, Desktop installs the Hermes runtime into `~/.hermes` (same layout as CLI).
+Hermes can still reason about the repo and, once the MCP server is implemented, will be able to create/run boards without requiring a Desktop tab.
 
-## Surfaces inside Desktop
+## Target Desktop tab UX
 
-| Pane | Purpose |
-|------|---------|
-| **Chat** | Streaming agent, tool cards, file preview rail |
-| **File browser** | Explore cwd while agent works |
-| **Settings** | Providers, models, MCP, gateway |
-| **Management** | Skills, Cron, Profiles, Messaging |
-| **Agents / Command Center** | Multi-agent orchestration (Hermes-native) |
+A future Hermes Desktop tab should be only a host shell:
 
-Desktop also supports **remote backend**: Settings → Gateway → Remote gateway → URL of a running `hermes dashboard` on another machine.
-
-## Protocols relevant to pinodes-orchestra
-
-| Protocol | Transport | Fit for Orchestra |
-|----------|-----------|---------------------|
-| **ACP** (`hermes acp`) | JSON-RPC stdio | ❌ Single chat session — IDE-style, not multi-node canvas |
-| **TUI gateway** | JSON-RPC stdio / WebSocket | ✅ Per-node sessions: `prompt.submit`, `session.steer`, `session.interrupt`, streaming events |
-| **API server** | HTTP OpenAI-compat | ⚠️ Less control — no fine-grained steer/approval |
-| **Dashboard `/api/ws`** | WebSocket JSON-RPC | ✅ Same as TUI gateway; powers Chat tab |
-
-**Key insight:** Hermes Chat tab is literally the Ink TUI rendered via xterm.js through a PTY bridge to `tui_gateway`. pinodes-orchestra uses the same pattern (xterm.js + PTY) but orchestrates **many** sessions in a graph.
-
-## Remote backend requirements
-
-If Orchestra runs against a remote `hermes dashboard`:
-
-1. Dashboard must be running (`hermes dashboard --host 0.0.0.0 --port 9119 --tui`)
-2. `--tui` is **mandatory** — without it, `/api/ws` returns close code **4403**
-3. Pin `HERMES_DASHBOARD_SESSION_TOKEN` in `.env` — token regenerates on restart otherwise
-4. Remote URL Host header must match bind address
-5. Protect with VPN (Tailscale) or OAuth — never expose `--insecure` to public internet
-
-Desktop readiness probe (`GET /api/status`) is weaker than live chat (`/api/ws`) — a 200 on status does not guarantee chat works.
-
-## Integration options for pinodes-orchestra
-
-### Option A — External web app (recommended first)
-
-Run pinodes-orchestra standalone (`npm run dev`) alongside Hermes Desktop. User alt-tabs between:
-
-- Hermes Desktop → single-agent chat, settings, skills
-- pinodes-orchestra → multi-agent visual graph
-
-**Pros:** zero Hermes code changes, full Orchestra UX preserved  
-**Cons:** two windows, no shared tab chrome
-
-### Option B — Orchestra tab in Hermes Desktop (target)
-
-Hermes Desktop is Electron + React. A new sidebar item **Orchestra** could:
-
-1. Load pinodes-orchestra UI in an `<iframe>` or `BrowserView` pointing to `http://localhost:3847`
-2. Or bundle the Orchestra React app and talk to a local pinodes-orchestra backend subprocess
-
-```
-Hermes Desktop sidebar
+```text
+Hermes Desktop
   ├─ Chat
   ├─ Files
-  ├─ Orchestra  ← NEW: webview → pinodes-orchestra backend
+  ├─ Orchestra  ← iframe to pinodes-orchestra backend/frontend
+  ├─ Skills
   └─ Settings
 ```
 
-**Requires:** PR or plugin to Hermes Desktop (not a public extension API today). pinodes-orchestra side only needs stable HTTP + WS (already have).
+Minimal iframe URL:
 
-### Option C — Hermes nodes instead of pi nodes
+```text
+http://127.0.0.1:3847/?embed=hermes-desktop&cwd=<active-project-cwd>&token=<optional-token>
+```
 
-Replace `PtyHub` pi spawn with `HermesRuntime`:
+`frontend/src/lib/embed.ts` already treats any `?embed=<mode>` as embedded and reads `cwd`; verify this in the Desktop PR rather than adding host-specific frontend forks.
 
-- Each graph node = Hermes session via TUI gateway JSON-RPC
-- Handoff via `delegate_task` or custom output block
-- Terminals show gateway stream events instead of ANSI
+## Desktop implementation rules
 
-**Pros:** native Hermes tools/skills/memory per node  
-**Cons:** significant adapter work; different handoff semantics
+Do:
 
-### Option D — Hermes plugin
+- add a sidebar item “Orchestra”;
+- health-check `GET /api/health` before showing the iframe;
+- show a clear placeholder if the backend is down;
+- pass cwd and optional token through the iframe URL;
+- keep Orchestra backend as a separate process or existing standalone service.
 
-`hermes plugins` can register tools. Orchestra could expose:
+Do **not**:
 
-- `orchestra_run_flow`
-- `orchestra_get_board_state`
+- rewrite Orchestra as a Hermes Electron plugin;
+- put the canvas inside the Hermes Chat panel;
+- fork the Orchestra frontend for Hermes;
+- make Desktop embedding block MCP/control-plane work;
+- expose raw terminal input through Hermes by default.
 
-Useful as **satellite** so Hermes Chat can trigger flows, not as the visual canvas itself.
+## Security notes
 
-## Hermes Desktop vs pinodes-orchestra positioning
+- Local default: backend binds `127.0.0.1`.
+- Remote/LAN use: require `PINODES_ORCHESTRA_TOKEN` and protect with VPN/Tailscale or equivalent.
+- Never put secrets in `runtimeConfig`; runtime credentials stay in their own configs/env.
+- MCP safe mode should enforce allowed workspace roots and avoid raw PTY input.
 
-| Dimension | Hermes Desktop Chat | pinodes-orchestra |
-|-----------|---------------------|--------------|
-| UX | Linear chat + tool cards | Graph + embedded terminals |
-| Agents | One (or Command Center lists) | Many parallel, topology explicit |
-| Intervention | Composer messages, approvals | Direct terminal typing |
-| Handoff | `delegate_task`, @session | `@@HANDOFF` + edge validation |
-| Best for | General coding agent | Visual multi-agent pipelines |
+## Related docs
 
-They are **complementary**, not competing. Orchestra is the "mission control" view; Hermes Chat is the "single agent cockpit."
-
-## Cursor inside the picture
-
-- **pi + Cursor SDK** (current setup): pi nodes can bridge to Cursor tools — Orchestra stays pi-centric
-- **Cursor agent nodes** (planned): node type `runtime: cursor` spawning Cursor agent sessions — see EXTENSIONS_ROADMAP
-- **Hermes + Cursor**: Hermes supports multiple providers; Cursor integration would be at Hermes provider level, not Orchestra-specific
-
-## Recommended path
-
-1. **Now:** standalone pinodes-orchestra (reference impl) + IDE extension via Open VSX (Cursor, Windsurf, VS Code)
-2. **Next:** Hermes Desktop Orchestra tab via iframe to localhost backend (Option B)
-3. **Later:** `HermesRuntime` adapter for native Hermes nodes (Option C)
-
-## References
-
-- Desktop: https://hermes-agent.nousresearch.com/docs/user-guide/desktop
-- Dashboard: https://hermes-agent.nousresearch.com/docs/user-guide/features/web-dashboard
-- Programmatic: https://hermes-agent.nousresearch.com/docs/developer-guide/programmatic-integration
-- Remote backend guide: https://hermes-agent.ai/blog/connect-hermes-desktop-remote-backend
+- [HERMES_CONTROL_PLANE_PLAN.md](../plans/HERMES_CONTROL_PLANE_PLAN.md) — MCP + Desktop implementation plan.
+- [PROGRAMMATIC_API.md](./PROGRAMMATIC_API.md) — REST/CLI surface used by MCP and hosts.
+- [SECURITY.md](./SECURITY.md) — token, CORS, Origin checks, bind model.
+- [EXTENSIONS_ROADMAP.md](../roadmaps/EXTENSIONS_ROADMAP.md) — high-level host/runtime sequencing.

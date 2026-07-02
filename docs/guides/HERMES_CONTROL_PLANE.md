@@ -15,7 +15,7 @@ npm test -w mcp-server
 The compiled stdio entrypoint is:
 
 ```bash
-/home/emanu/Scrivania/Workspace/pinodes-orchestra-mcp/mcp-server/dist/index.js
+/home/emanu/Scrivania/Workspace/pinodes-orchestra/mcp-server/dist/index.js
 ```
 
 ## Hermes Configuration
@@ -27,9 +27,9 @@ mcp_servers:
   pinodes_orchestra:
     command: "node"
     args:
-      - "/home/emanu/Scrivania/Workspace/pinodes-orchestra-mcp/mcp-server/dist/index.js"
+      - "/home/emanu/Scrivania/Workspace/pinodes-orchestra/mcp-server/dist/index.js"
     env:
-      PINODES_ORCHESTRA_URL: "<http://127.0.0.1:3847>"
+      PINODES_ORCHESTRA_URL: "http://127.0.0.1:3847"
       PINODES_ORCHESTRA_ALLOWED_ROOTS: "/home/emanu/Scrivania/Workspace"
       PINODES_ORCHESTRA_MCP_MODE: "safe"
 ```
@@ -37,7 +37,7 @@ mcp_servers:
 Equivalent CLI registration:
 
 ```bash
-hermes mcp add pinodes_orchestra --command node --args /home/emanu/Scrivania/Workspace/pinodes-orchestra-mcp/mcp-server/dist/index.js
+hermes mcp add pinodes_orchestra --command node --args /home/emanu/Scrivania/Workspace/pinodes-orchestra/mcp-server/dist/index.js
 hermes mcp test pinodes_orchestra
 ```
 
@@ -94,5 +94,5 @@ hermes mcp test pinodes_orchestra
 For a local protocol sanity check, starting the compiled server with closed stdin should exit without printing diagnostic output to stdout:
 
 ```bash
-node /home/emanu/Scrivania/Workspace/pinodes-orchestra-mcp/mcp-server/dist/index.js
+node /home/emanu/Scrivania/Workspace/pinodes-orchestra/mcp-server/dist/index.js
 ```

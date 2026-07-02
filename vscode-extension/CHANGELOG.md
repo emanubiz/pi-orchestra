@@ -19,7 +19,7 @@ All notable changes to the **PiNodes Orchestra** extension are documented here.
 - **Claude Code runtime (third node runtime).** A new `ClaudeRuntime` runs as a first-class backend runtime alongside `pi` and `hermes`. It reuses the same PTY bridge, parses output through the existing `@@HANDOFF` / `@@CARD` / `@@DONE` text sentinels (no bespoke JSON-RPC), and bridges lifecycle events into the existing `/internal/turn-started` / `/internal/turn-ended` handoff protocol via `backend/claude-hooks/orchestra-hook.mjs`. `runtimeConfig.toolset` is now read for all three runtimes and translated to Claude's own tool vocabulary, so cards/steps can pin a toolset per node across the whole multi-runtime fleet.
 - **Claude availability detection** (`backend/src/pty/runtime/claudeAvailability.ts`) — runtime is marked `available` / `unavailable` based on a real probe of the `claude` CLI on `PATH`, surfaced in `GET /api/v1/orchestra/status` and disabled cleanly in the `RuntimeSelector` when missing.
 - **Per-runtime Claude settings resolver** (`backend/src/pty/runtime/resolveClaudeSettings.ts`) — env, model and per-board overrides are merged with a documented precedence.
-- **Zero-runtime analysis** (`docs/plans/ZERO_RUNTIME_ANALYSIS.md`) — a lightweight, local-only node that runs a pre-bundled prompt graph without a TUI, mapped against the existing `NodeRuntime` interface for future implementation.
+- **Zero-runtime analysis** (`docs/archive/ZERO_RUNTIME_ANALYSIS.md`) — a feasibility study for a lightweight/local node runtime; archived because the current PTY pattern is not viable for Zero today.
 - **Documentation**
   - `docs/guides/CLAUDE_RUNTIME.md` — operator + developer guide for the Claude runtime.
   - `docs/roadmaps/EXTENSIONS_ROADMAP.md` — Claude added as a Tier 1 supported runtime.
@@ -36,7 +36,7 @@ All notable changes to the **PiNodes Orchestra** extension are documented here.
 - **Frontend runtime selector** (`frontend/src/components/RuntimeSelector.tsx`, `RuntimeBadge.tsx`, `AddAgentModal.tsx`, `useOrchestraWs.ts`, `stores/runtimeStore.ts`) — the third runtime is rendered inline on node cards; selecting it pre-fills the right defaults and disables Claude cleanly when `available: false`.
 - **Type model extended to `"claude"`.** `backend/src/types.ts`, `backend/src/routes/orchestra.ts`, `backend/src/ws/handler.ts`, `frontend/src/types.ts` — the `Runtime` union now includes `"claude"` and `claudeAvailability` is passed through WS and REST status payloads.
 - **`docs/guides/PROGRAMMATIC_API.md`** — examples and the runtime enum updated to include `claude`.
-- **`docs/plans/CLAUDE_CODE_RUNTIME_PLAN.md`** — moved from "planned" to "shipped" with a short post-mortem section.
+- **`docs/archive/CLAUDE_CODE_RUNTIME_PLAN.md`** — moved from "planned" to "shipped" with a short post-mortem section.
 - **`docs/guides/HERMES_RUNTIME.md`** — runtime enum extended to `"pi" | "hermes" | "claude"` and a one-line pointer added to the new `CLAUDE_RUNTIME.md` guide.
 - **CI: VSIX publish workflow is now idempotent and per-platform resilient** (`.github/workflows/publish-extension.yml`) — re-runs after a partial failure no longer re-publish stale artifacts, and a single platform failure no longer blocks the others.
 - **`vscode-extension/scripts/bundle.mjs`** — now copies `backend/claude-hooks/` into the bundled extension output so Claude's `--settings` hook path resolves identically in dev, dist, and the published VSIX.

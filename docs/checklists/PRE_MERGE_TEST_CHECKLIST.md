@@ -1,6 +1,6 @@
-# Pre-Merge Test Checklist — feat/multi-runtime
+# Pre-Merge Test Checklist
 
-**Branch:** feat/multi-runtime
+**Branch:** main
 **Date:** 2026-07-XX (fill before testing)
 **Tester:** ___________
 
@@ -98,10 +98,6 @@ This tests that the ring buffer (256 KB cap) works correctly under heavy output.
 No manual setup — the plugin installs itself on first Hermes spawn, and the
 runtime is auto-detected when the `hermes` CLI is on the backend PATH. Only
 force the flag if auto-detection can't see your install:
-
-```bash
-export PINODES_ORCHESTRA_HERMES=true   # optional override; auto-detect is the default
-```
 
 | Check | Expected | ✅/❌ |
 |-------|----------|------|
