@@ -3,6 +3,8 @@ import { getPrompt } from "../db/index.js";
 import type { NodeRuntime, NodeStatus, WorkflowEdge, WorkflowGraph, WorkflowNode } from "../types.js";
 import { resolveCwd } from "../utils/paths.js";
 import type { INodeRuntime } from "./runtime/INodeRuntime.js";
+import { CodexRuntime } from "./runtime/CodexRuntime.js";
+import { isCodexRuntimeAvailable } from "./runtime/codexAvailability.js";
 import { ClaudeRuntime } from "./runtime/ClaudeRuntime.js";
 import { isClaudeRuntimeAvailable } from "./runtime/claudeAvailability.js";
 import { HermesRuntime } from "./runtime/HermesRuntime.js";
@@ -26,7 +28,7 @@ const MAX_TURN_ENDED_RETRIES = 3;
 // turn-ended nudge in handleTurnEnded). pi is NOT here: its extension enforces
 // explicit intent client-side (enforceIntent at agent_end), so a server nudge
 // would double up.
-const SERVER_NUDGED_RUNTIMES: ReadonlySet<NodeRuntime> = new Set(["hermes", "claude"]);
+const SERVER_NUDGED_RUNTIMES: ReadonlySet<NodeRuntime> = new Set(["hermes", "claude", "codex"]);
 // ── Closed-loop submit confirmation (plan B) ─────────────────────────────────
 // After injecting a task (bracketed-paste + `\r`) we can't observe whether the
 // runtime's input line actually submitted it — a timing/async race can leave the
@@ -402,11 +404,13 @@ export class PtyHub {
       (this.kanbanBoards.has(boardId) ? this.kanbanAppendix() : "");
 
     const runtime: INodeRuntime =
-      node?.runtime === "hermes" && isHermesRuntimeAvailable()
-        ? new HermesRuntime()
-        : node?.runtime === "claude" && isClaudeRuntimeAvailable()
-          ? new ClaudeRuntime()
-          : new PiRuntime();
+      node?.runtime === "codex"
+        ? new CodexRuntime()
+        : node?.runtime === "hermes" && isHermesRuntimeAvailable()
+          ? new HermesRuntime()
+          : node?.runtime === "claude" && isClaudeRuntimeAvailable()
+            ? new ClaudeRuntime()
+            : new PiRuntime();
 
     const k = key(boardId, nodeId);
     this.ready.delete(k);
@@ -426,6 +430,23 @@ export class PtyHub {
       appendix,
       orchestraUrl: BASE_URL,
       runtimeConfig: node?.runtimeConfig,
+      orchestration: {
+        onReady: () => this.markReady(boardId, nodeId),
+        onTurnStarted: () => {
+          this.handleTurnStarted(boardId, nodeId);
+        },
+        onTurnEnded: (handoffCalledThisTurn) => {
+          this.handleTurnEnded(boardId, nodeId, handoffCalledThisTurn);
+        },
+        deliverHandoff: (targetNodeId, message) =>
+          this.deliverCall(boardId, nodeId, targetNodeId, message),
+        notifyCard: (column) => {
+          this.notify({ type: "card_status", boardId, column });
+        },
+        refreshAppendix: () =>
+          this.connectionsAppendix(boardId, nodeId) +
+          (this.kanbanBoards.has(boardId) ? this.kanbanAppendix() : ""),
+      },
       onOutput: (data) => {
         session.chunks.push(data);
         session.bufferLen += data.length;
@@ -457,6 +478,10 @@ export class PtyHub {
         this.events.emit(`exit:${boardId}:${nodeId}`, exitCode ?? null);
       },
     });
+
+    // Structured runtimes (e.g. Codex) may call onExit synchronously during
+    // spawn when unavailable — do not broadcast "running" after the session ended.
+    if (!this.sessions.has(k)) return;
 
     this.broadcast({ type: "node_status", boardId, nodeId, status: "running" });
     // Tell read-only mirrors the PTY's real size so they can render pi's

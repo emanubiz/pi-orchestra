@@ -63,6 +63,8 @@ export function App() {
   const setActiveBoardId = useRuntimeStore((s) => s.setActiveBoardId);
   const clearBoardRuntime = useRuntimeStore((s) => s.clearBoardRuntime);
   const setHermesAvailable = useRuntimeStore((s) => s.setHermesAvailable);
+  const setClaudeAvailable = useRuntimeStore((s) => s.setClaudeAvailable);
+  const setCodexAvailable = useRuntimeStore((s) => s.setCodexAvailable);
 
   useEffect(() => {
     // Embedded host (VS Code) provides the workspace cwd directly: bind the
@@ -73,17 +75,26 @@ export function App() {
     }
     void apiFetch("/api/info")
       .then((r) => r.json())
-      .then((data: { defaultCwd?: string; runtimes?: { hermes?: boolean } }) => {
+      .then((data: {
+        defaultCwd?: string;
+        runtimes?: { hermes?: boolean; claude?: boolean; codex?: boolean };
+      }) => {
         if (data.defaultCwd) setDefaultCwd(data.defaultCwd);
         if (typeof data.runtimes?.hermes === "boolean") {
           setHermesAvailable(data.runtimes.hermes);
+        }
+        if (typeof data.runtimes?.claude === "boolean") {
+          setClaudeAvailable(data.runtimes.claude);
+        }
+        if (typeof data.runtimes?.codex === "boolean") {
+          setCodexAvailable(data.runtimes.codex);
         }
       })
       .catch((err) => {
         console.error("pinodes-orchestra: /api/info unreachable", err);
         /* backend offline — BoardTabs will use "." */
       });
-  }, [setDefaultCwd, bindWorkspace, setHermesAvailable]);
+  }, [setDefaultCwd, bindWorkspace, setHermesAvailable, setClaudeAvailable, setCodexAvailable]);
 
   useEffect(() => {
     setActiveBoardId(activeBoard.id);
@@ -484,6 +495,7 @@ export function App() {
           boardId={activeBoard.id}
           nodeId={overlayNodeId}
           label={overlayNode?.data.label ?? "pi"}
+          runtime={overlayNode?.data.runtime ?? "pi"}
           send={send}
           onClose={() => setOverlayNodeId(null)}
         />

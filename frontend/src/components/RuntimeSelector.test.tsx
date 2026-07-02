@@ -42,4 +42,24 @@ describe("RuntimeSelector", () => {
     expect(screen.getByTitle(/CLI was not found/i)).toBeTruthy();
     expect(screen.getByText("⚠")).toBeTruthy();
   });
+
+  it("offers codex and calls onChange with it", () => {
+    const onChange = vi.fn();
+    render(<RuntimeSelector value="pi" onChange={onChange} />);
+
+    act(() => {
+      screen.getByRole("button", { name: "codex" }).click();
+    });
+
+    expect(onChange).toHaveBeenCalledWith("codex");
+  });
+
+  it("shows a warning affordance when codex is selected but unavailable", () => {
+    render(
+      <RuntimeSelector value="codex" codexAvailable={false} onChange={vi.fn()} />,
+    );
+
+    expect(screen.getByTitle(/fail to start until Codex is installed/i)).toBeTruthy();
+    expect(screen.getByText("⚠")).toBeTruthy();
+  });
 });

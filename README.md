@@ -7,7 +7,7 @@ is a real AI agent process (**pi** or **Hermes**, mixed freely) in its own PTY;
 edges define who may hand off to whom; you can type into any terminal at any
 time. Semi-automatic pipelines with a human in the loop on every node.
 
-- **Multi-runtime nodes** — `pi` (default), `hermes --tui` and **Claude Code**, chosen per node and mixed freely on one board
+- **Multi-runtime nodes** — `pi` (default), `hermes --tui`, **Claude Code**, and **Codex** (structured/headless), chosen per node and mixed freely on one board
 - **One handoff standard** — agents delegate with `@@HANDOFF` text blocks, identical across runtimes, gated by graph edges
 - **Deterministic delivery** — closed-loop submit confirmation + handoff watchdog: tasks can't silently stall
 - **Kanban + Timeline** — cards advance with node status; every handoff is logged
@@ -85,11 +85,12 @@ Details: [`vscode-extension/README.md`](./vscode-extension/README.md),
 - API keys in `~/.pi/agent/auth.json` or env vars
 - *(optional)* the `hermes` CLI on PATH to enable Hermes runtime nodes — auto-detected, zero further setup ([guide](./docs/guides/HERMES_RUNTIME.md))
 - *(optional)* the `claude` CLI on PATH to enable Claude Code runtime nodes — auto-detected ([guide](./docs/guides/CLAUDE_RUNTIME.md))
+- *(optional)* the `codex` CLI on PATH to enable Codex structured runtime nodes — auto-detected ([guide](./docs/guides/CODEX_RUNTIME.md))
 
 ## Usage
 
 1. **Left tabs**: one board per repo folder; **+** to open another path
-2. Click **+ Add agent** (toolbar or empty canvas) → pick a prompt, optionally preview it, choose **pi** or **hermes** runtime, then confirm
+2. Click **+ Add agent** (toolbar or empty canvas) → pick a prompt, optionally preview it, choose **pi**, **hermes**, **claude**, or **codex** runtime, then confirm
 3. Drag connections between nodes (defines hand-off permissions)
 4. Select a node → interactive terminal in side panel; runtime badge on the card is read-only; **Timeline** tab shows handoff chronology
 5. Per-node card controls (icons on the card header): **flag** toggles `canBeFinal` (may end the chain vs. must hand off), **shield** toggles the handoff watchdog (on = must hand off or say it's done; off = free chat), **scroll** opens the per-node system-prompt override. Kanban cards advance through columns automatically as nodes change status.
@@ -109,6 +110,8 @@ Details: [`vscode-extension/README.md`](./vscode-extension/README.md),
 | `PINODES_ORCHESTRA_DATA_DIR` | SQLite location |
 | `PINODES_ORCHESTRA_TOKEN` | Optional shared secret for all API/internal routes and WebSocket handshakes (except `/api/health`) |
 | `PINODES_ORCHESTRA_HERMES` | *(auto)* | Optional override: `false` disables Hermes; `true` forces it on. Default: detect `hermes` on backend PATH |
+| `PINODES_ORCHESTRA_CLAUDE` | *(auto)* | Optional override for Claude Code runtime availability |
+| `PINODES_ORCHESTRA_CODEX` | *(auto)* | Optional override for Codex structured runtime availability |
 | `VITE_API_BASE` | Custom backend URL at frontend build time |
 
 Two additional variables are set automatically by hosts and rarely need manual
@@ -127,6 +130,7 @@ When `PINODES_ORCHESTRA_TOKEN` is set, browser clients must provide it. The VS C
 |-----|----------|
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | System design, runtimes, WS protocol, handoff |
 | [docs/guides/HERMES_RUNTIME.md](./docs/guides/HERMES_RUNTIME.md) | Hermes nodes — setup, UI, flags |
+| [docs/guides/CODEX_RUNTIME.md](./docs/guides/CODEX_RUNTIME.md) | Codex structured nodes — setup, config, smoke |
 | [docs/guides/SECURITY.md](./docs/guides/SECURITY.md) | Threat model, controls, configuration |
 | [docs/roadmaps/EXTENSIONS_ROADMAP.md](./docs/roadmaps/EXTENSIONS_ROADMAP.md) | Host integrations & runtime roadmap |
 | [docs/guides/PROGRAMMATIC_API.md](./docs/guides/PROGRAMMATIC_API.md) | REST/CLI API for boards, flows, auth |

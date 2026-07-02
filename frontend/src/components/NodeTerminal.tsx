@@ -3,11 +3,13 @@ import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { onNodeReady, onPtyOutput, onPtySize } from "../lib/ptyBus";
 import { TERM_FONT, TERM_THEME, useTerminalBridge } from "../lib/termTheme";
+import { isStructuredRuntime, runtimeStartingLabel } from "../lib/runtimeKind";
 import { useRuntimeStore } from "../stores/runtimeStore";
 
 /** Live, read-only mini view of a node's terminal, embedded in its card. */
 export function NodeTerminal({ nodeId, restarting, runtime }: { nodeId: string; restarting?: boolean; runtime?: string }) {
   const rt = runtime ?? "pi";
+  const structured = isStructuredRuntime(rt);
   const { boardId, send } = useTerminalBridge();
   const cardRef = useRef<HTMLDivElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -24,13 +26,13 @@ export function NodeTerminal({ nodeId, restarting, runtime }: { nodeId: string; 
     const term = new Terminal({
       disableStdin: true,
       cursorBlink: false,
+      convertEol: structured,
       fontSize: 11,
       lineHeight: 1.15,
       fontFamily: TERM_FONT,
       theme: TERM_THEME,
       allowTransparency: true,
       scrollback: 800,
-      convertEol: false,
       minimumContrastRatio: 1,
     });
     term.open(host);
@@ -47,6 +49,11 @@ export function NodeTerminal({ nodeId, restarting, runtime }: { nodeId: string; 
     // width and the scale collapses to ~1 (the old "only fills part of the card"
     // bug). `.xterm-screen` is sized to `cols × cellWidth` — the real content.
     const rescale = () => {
+      if (structured) {
+        host.style.transform = "";
+        host.style.width = "100%";
+        return;
+      }
       const cardW = card.clientWidth;
       const screenEl = host.querySelector(".xterm-screen") as HTMLElement | null;
       const natW = screenEl?.offsetWidth ?? 0;
@@ -67,7 +74,7 @@ export function NodeTerminal({ nodeId, restarting, runtime }: { nodeId: string; 
       scheduleRescale();
     };
 
-    const unsubSize = onPtySize(key, applySize);
+    const unsubSize = structured ? () => {} : onPtySize(key, applySize);
     const unsub = onPtyOutput(key, (data, replay) => {
       if (replay) term.reset();
       term.write(data, scheduleRescale);
@@ -102,7 +109,7 @@ export function NodeTerminal({ nodeId, restarting, runtime }: { nodeId: string; 
       term.dispose();
       termRef.current = null;
     };
-  }, [boardId, nodeId, send, connected]);
+  }, [boardId, nodeId, send, connected, structured, rt]);
 
   // pointer-events off so dragging/clicking the node still works through it.
   return (
@@ -111,7 +118,7 @@ export function NodeTerminal({ nodeId, restarting, runtime }: { nodeId: string; 
       <div ref={hostRef} style={{ pointerEvents: "none", width: "max-content" }} />
       {!live && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[10px] text-zinc-600">
-          starting {rt}…
+          {runtimeStartingLabel(rt)}
         </div>
       )}
       {restarting && (

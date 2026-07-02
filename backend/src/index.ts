@@ -17,6 +17,7 @@ import {
 } from "./db/index.js";
 import { ptyHub } from "./pty/PtyHub.js";
 import { isHermesRuntimeAvailable } from "./pty/runtime/hermesAvailability.js";
+import { isCodexRuntimeAvailable } from "./pty/runtime/codexAvailability.js";
 import { isClaudeRuntimeAvailable } from "./pty/runtime/claudeAvailability.js";
 import { orchestraRoutes } from "./routes/orchestra.js";
 
@@ -75,6 +76,7 @@ app.get("/api/health", async () => ({
   runtimes: {
     hermes: isHermesRuntimeAvailable(),
     claude: isClaudeRuntimeAvailable(),
+    codex: isCodexRuntimeAvailable(),
   },
 }));
 
@@ -89,6 +91,7 @@ app.get("/api/info", async () => ({
   runtimes: {
     hermes: isHermesRuntimeAvailable(),
     claude: isClaudeRuntimeAvailable(),
+    codex: isCodexRuntimeAvailable(),
   },
 }));
 

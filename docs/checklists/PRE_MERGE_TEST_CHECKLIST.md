@@ -143,6 +143,23 @@ Requires the `claude` CLI on the backend PATH with auth configured (auto-detecte
 | Kill cleanup | Stopping the node leaves no orphaned `claude` processes (`pgrep -f claude`) |  |
 | Self-gating | A manually-launched `claude` outside Orchestra is unaffected (no orchestra hooks) |  |
 
+### 4-D. Codex Structured Runtime Path — 3 min
+
+Requires the `codex` CLI on the backend PATH with auth configured (auto-detected;
+`PINODES_ORCHESTRA_CODEX=true` to force). Create a node with **runtime: codex** and run it.
+
+| Check | Expected | ✅/❌ |
+|-------|----------|------|
+| Codex available | `/api/info` → `runtimes.codex: true` |  |
+| Session ready | Terminal shows `─ codex session ready ─` without waiting for TUI |  |
+| Structured input | Keyboard typing in side panel does **not** send `pty_input`; hint visible |  |
+| Handoff delivery | Upstream node injects task; Codex turn starts (node status → running) |  |
+| Output streaming | Codex JSONL events appear as text in terminal panel |  |
+| Handoff works | Codex node emits `@@HANDOFF … @@END`; delivered to connected node |  |
+| Watchdog | Non-final codex node ending without handoff gets nudged, errors at cap |  |
+| No pi fallback | With Codex unavailable, node fails clearly (does not spawn pi) |  |
+| Restart | Restart node → fresh Codex session (unless `resumeThreadId` in config) |  |
+
 ---
 
 ## 5. Edge Cases (optional, 2 min)
@@ -165,6 +182,7 @@ Requires the `claude` CLI on the backend PATH with auth configured (auto-detecte
 | Ring-buffer scrollback | ⬜ |
 | Add-agent flow (prompt + runtime) | ⬜ |
 | Hermes path | ⬜ |
+| Codex structured path | ⬜ |
 | Edge cases | ⬜ |
 
 **Decision:** ⬜ Ready to merge / ⬜ Blocker found (describe below)

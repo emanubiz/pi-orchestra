@@ -9,20 +9,27 @@ import { useRuntimeStore } from "../stores/runtimeStore";
 import { TERM_FONT, TERM_THEME } from "../lib/termTheme";
 import { fitWhenReady } from "../lib/termFit";
 import { attachClipboard } from "../lib/termClipboard";
+import {
+  isStructuredRuntime,
+  runtimeSessionEndedLabel,
+  STRUCTURED_INPUT_HINT,
+} from "../lib/runtimeKind";
 
 interface TerminalOverlayProps {
   boardId: string;
   nodeId: string;
   label: string;
+  runtime?: string;
   send: (msg: Record<string, unknown>) => void;
   onClose: () => void;
 }
 
 /** Full-screen interactive pi terminal for a single node. */
-export function TerminalOverlay({ boardId, nodeId, label, send, onClose }: TerminalOverlayProps) {
+export function TerminalOverlay({ boardId, nodeId, label, runtime = "pi", send, onClose }: TerminalOverlayProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const status = useRuntimeStore((s) => s.nodeStatus[`${boardId}:${nodeId}`]);
   const [restarting, setRestarting] = usePiRestartState(boardId, nodeId);
+  const structured = isStructuredRuntime(runtime);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -30,6 +37,8 @@ export function TerminalOverlay({ boardId, nodeId, label, send, onClose }: Termi
     const key = `${boardId}:${nodeId}`;
 
     const term = new Terminal({
+      convertEol: structured,
+      disableStdin: structured,
       fontSize: 13,
       lineHeight: 1.2,
       fontFamily: TERM_FONT,
@@ -48,9 +57,11 @@ export function TerminalOverlay({ boardId, nodeId, label, send, onClose }: Termi
       term.write(data);
     });
     const unsubExit = onPtyExit(key, () => {
-      term.write("\r\n\x1b[2m- pi session ended - use Restart -\x1b[0m\r\n");
+      term.write(`\r\n\x1b[2m${runtimeSessionEndedLabel(runtime)}\x1b[0m\r\n`);
     });
-    const onData = term.onData((data) => send({ type: "pty_input", nodeId, data }));
+    const onData = structured
+      ? null
+      : term.onData((data) => send({ type: "pty_input", nodeId, data }));
     const detachClipboard = attachClipboard(term, host);
 
     // Attach with a safe default size for the spawn case; resize:false so we
@@ -58,7 +69,7 @@ export function TerminalOverlay({ boardId, nodeId, label, send, onClose }: Termi
     // below sets the overlay's real (full-screen) width.
     send({ type: "attach_node", nodeId, cols: 80, rows: 24, resize: false });
 
-    const unsubscribeFit = fitWhenReady(term, fit, host, (cols, rows) => {
+    const unsubscribeFit = fitWhenReady(term, fit, host, structured ? () => {} : (cols, rows) => {
       send({ type: "pty_resize", nodeId, cols, rows });
     });
 
@@ -73,12 +84,12 @@ export function TerminalOverlay({ boardId, nodeId, label, send, onClose }: Termi
       window.removeEventListener("keydown", onKey);
       detachClipboard();
       unsubscribeFit();
-      onData.dispose();
+      onData?.dispose();
       unsubOut();
       unsubExit();
       term.dispose();
     };
-  }, [boardId, nodeId, send, onClose]);
+  }, [boardId, nodeId, send, onClose, runtime, structured]);
 
   return (
     <div
@@ -132,6 +143,9 @@ export function TerminalOverlay({ boardId, nodeId, label, send, onClose }: Termi
           </div>
         </div>
         <div className="flex-1 min-h-0 overflow-hidden p-2">
+          {structured && (
+            <p className="mb-1 px-1 text-[10px] leading-snug text-sky-400/80">{STRUCTURED_INPUT_HINT}</p>
+          )}
           <div ref={hostRef} className="h-full w-full" />
         </div>
       </div>

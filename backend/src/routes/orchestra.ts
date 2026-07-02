@@ -3,7 +3,7 @@ import { BoardManager } from "../orchestra/BoardManager.js";
 import { ptyHub } from "../pty/PtyHub.js";
 import type { NodeRuntime, WorkflowEdge, WorkflowGraph, WorkflowNode } from "../types.js";
 
-const VALID_RUNTIMES: ReadonlySet<string> = new Set(["pi", "hermes", "claude"]);
+const VALID_RUNTIMES: ReadonlySet<string> = new Set(["pi", "hermes", "claude", "codex"]);
 
 /** Clamp `waitTimeoutMs` to something sane: a non-number/NaN falls back to the
  *  default, and the value is bounded so a typo can neither make the wait

@@ -19,6 +19,7 @@ pinodes-orchestra/
     │   ├── EXTENSION_PUBLISHING.md
     │   ├── HERMES_RUNTIME.md          ← Hermes nodes: setup, UI, flags
     │   ├── CLAUDE_RUNTIME.md          ← Claude Code nodes: setup, hooks, flags
+    │   ├── CODEX_RUNTIME.md           ← Codex structured nodes: setup, config, smoke
     │   ├── HERMES_DESKTOP.md          ← Hermes Desktop host integration (future tab)
     │   └── TEST_COVERAGE.md
     │
@@ -28,6 +29,7 @@ pinodes-orchestra/
     │
     ├── plans/                         ← Detailed implementation plans
     │   ├── CLAUDE_CODE_RUNTIME_PLAN.md         ✅ shipped (Claude Code runtime)
+    │   ├── STRUCTURED_AGENT_RUNTIME_PLAN.md    🚧 Codex shipped; OpenCode/Zero deferred
     │   └── CURSOR_RUNTIME_ANALYSIS.md          ⏸️ deferred (feasibility study)
     │
     ├── checklists/
@@ -54,6 +56,7 @@ Also: [`vscode-extension/README.md`](../vscode-extension/README.md) — Cursor /
 | Run the app locally or in Cursor | [README.md](../README.md) |
 | Understand backend + PTY + handoff | [ARCHITECTURE.md](../ARCHITECTURE.md) |
 | Use Hermes agent nodes | [guides/HERMES_RUNTIME.md](./guides/HERMES_RUNTIME.md) |
+| Use Codex structured nodes | [guides/CODEX_RUNTIME.md](./guides/CODEX_RUNTIME.md) |
 | Call boards/flows from CI or scripts | [guides/PROGRAMMATIC_API.md](./guides/PROGRAMMATIC_API.md) |
 | Build or sideload the VSIX | [guides/EXTENSION_PUBLISHING.md](./guides/EXTENSION_PUBLISHING.md) |
 | See what's shipped vs planned | [roadmaps/EXTENSIONS_ROADMAP.md](./roadmaps/EXTENSIONS_ROADMAP.md) |
@@ -75,6 +78,7 @@ Also: [`vscode-extension/README.md`](../vscode-extension/README.md) — Cursor /
 | Add-agent flow (prompt picker + pre-spawn runtime) | ✅ + button, view-only preview, runtime locked after create |
 | `runtimeConfig.toolset` | ✅ |
 | **Claude Code runtime** (`runtime: "claude"`) | ✅ Shipped — [guides/CLAUDE_RUNTIME.md](./guides/CLAUDE_RUNTIME.md) |
+| **Codex structured runtime** (`runtime: "codex"`) | ✅ Shipped — [guides/CODEX_RUNTIME.md](./guides/CODEX_RUNTIME.md) |
 | Cursor Agent runtime | ⏸️ [plans/CURSOR_RUNTIME_ANALYSIS.md](./plans/CURSOR_RUNTIME_ANALYSIS.md) (deferred; use pi-as-proxy) |
 | Hermes Desktop embedded tab | 🔜 Host-side work |
 | OpenClaw integration | 🔜 |

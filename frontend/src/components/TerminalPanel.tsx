@@ -10,6 +10,11 @@ import { onPtyExit, onPtyOutput } from "../lib/ptyBus";
 import { fitWhenReady } from "../lib/termFit";
 import { TERM_FONT, TERM_THEME } from "../lib/termTheme";
 import { attachClipboard } from "../lib/termClipboard";
+import {
+  isStructuredRuntime,
+  runtimeSessionEndedLabel,
+  STRUCTURED_INPUT_HINT,
+} from "../lib/runtimeKind";
 import type { WorkflowNodeData } from "../types";
 
 interface TerminalPanelProps {
@@ -23,6 +28,7 @@ export function TerminalPanel({ boardId, send, getSelectedNode }: TerminalPanelP
   const selectedNodeId = useRuntimeStore((s) => s.selectedNodeId);
   const node = selectedNodeId ? getSelectedNode() : undefined;
   const runtime = node?.data.runtime ?? "pi";
+  const structured = isStructuredRuntime(runtime);
   const status = useRuntimeStore((s) =>
     selectedNodeId ? s.nodeStatus[`${boardId}:${selectedNodeId}`] : undefined,
   );
@@ -38,7 +44,8 @@ export function TerminalPanel({ boardId, send, getSelectedNode }: TerminalPanelP
     const key = `${boardId}:${selectedNodeId}`;
 
     const term = new Terminal({
-      convertEol: false,
+      convertEol: structured,
+      disableStdin: structured,
       fontSize: 12.5,
       lineHeight: 1.15,
       fontFamily: TERM_FONT,
@@ -59,10 +66,12 @@ export function TerminalPanel({ boardId, send, getSelectedNode }: TerminalPanelP
       term.write(data);
     });
     const unsubExit = onPtyExit(key, () => {
-      term.write(`\r\n\x1b[2m- ${runtime} session ended - use Restart -\x1b[0m\r\n`);
+      term.write(`\r\n\x1b[2m${runtimeSessionEndedLabel(runtime)}\x1b[0m\r\n`);
     });
 
-    const onData = term.onData((data) => send({ type: "pty_input", nodeId: selectedNodeId, data }));
+    const onData = structured
+      ? null
+      : term.onData((data) => send({ type: "pty_input", nodeId: selectedNodeId, data }));
     const detachClipboard = attachClipboard(term, host);
 
     // Attach immediately with a safe default size so a brand-new PTY is never
@@ -75,7 +84,7 @@ export function TerminalPanel({ boardId, send, getSelectedNode }: TerminalPanelP
       term,
       fit,
       host,
-      (cols, rows) => {
+      structured ? () => {} : (cols, rows) => {
         send({ type: "pty_resize", nodeId: selectedNodeId, cols, rows });
       },
     );
@@ -85,14 +94,14 @@ export function TerminalPanel({ boardId, send, getSelectedNode }: TerminalPanelP
     return () => {
       detachClipboard();
       unsubscribeFit();
-      onData.dispose();
+      onData?.dispose();
       unsubOut();
       unsubExit();
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
     };
-  }, [boardId, selectedNodeId, send]);
+  }, [boardId, selectedNodeId, send, runtime, structured]);
 
   // The side panel and the full-screen overlay share ONE pi PTY. While the
   // overlay is open it sizes that PTY to its own (much wider) width. When the
@@ -113,12 +122,12 @@ export function TerminalPanel({ boardId, send, getSelectedNode }: TerminalPanelP
       } catch {
         return;
       }
-      if (term.cols > 0 && term.rows > 0) {
+      if (term.cols > 0 && term.rows > 0 && !structured) {
         send({ type: "pty_resize", nodeId: selectedNodeId, cols: term.cols, rows: term.rows });
       }
     });
     return () => cancelAnimationFrame(id);
-  }, [overlayNodeId, selectedNodeId, send]);
+  }, [overlayNodeId, selectedNodeId, send, structured]);
 
   if (!selectedNodeId) {
     return (
@@ -178,6 +187,9 @@ export function TerminalPanel({ boardId, send, getSelectedNode }: TerminalPanelP
         </div>
       </div>
       <div className="flex-1 min-h-0 overflow-hidden px-1.5 py-1">
+        {structured && (
+          <p className="mb-1 px-1 text-[10px] leading-snug text-sky-400/80">{STRUCTURED_INPUT_HINT}</p>
+        )}
         <div ref={hostRef} className="h-full w-full" />
       </div>
     </div>

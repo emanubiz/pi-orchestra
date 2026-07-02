@@ -23,6 +23,7 @@ export function useOrchestraWs(
     setConnected,
     setHermesAvailable,
     setClaudeAvailable,
+    setCodexAvailable,
     setNodeStatus,
     setNodeError,
     clearNodeError,
@@ -74,6 +75,7 @@ export function useOrchestraWs(
               const rt = msg.runtimes as Record<string, unknown>;
               if (typeof rt.hermes === "boolean") setHermesAvailable(rt.hermes);
               if (typeof rt.claude === "boolean") setClaudeAvailable(rt.claude);
+              if (typeof rt.codex === "boolean") setCodexAvailable(rt.codex);
             }
             break;
           case "node_status":

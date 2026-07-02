@@ -1,7 +1,7 @@
 export type NodeStatus = "idle" | "running" | "done" | "error";
 
 /** Which agent runtime backs a node's PTY. Absent === "pi" (backward compat). */
-export type NodeRuntime = "pi" | "hermes" | "claude";
+export type NodeRuntime = "pi" | "hermes" | "claude" | "codex";
 
 export interface SystemPrompt {
   id: string;

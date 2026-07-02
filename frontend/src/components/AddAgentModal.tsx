@@ -27,6 +27,7 @@ export function AddAgentModal({
 }: AddAgentModalProps) {
   const hermesAvailable = useRuntimeStore((s) => s.hermesAvailable);
   const claudeAvailable = useRuntimeStore((s) => s.claudeAvailable);
+  const codexAvailable = useRuntimeStore((s) => s.codexAvailable);
   const [step, setStep] = useState<Step>("pick");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<SystemPrompt | null>(null);
@@ -225,6 +226,7 @@ export function AddAgentModal({
                   value={runtime}
                   hermesAvailable={hermesAvailable}
                   claudeAvailable={claudeAvailable}
+                  codexAvailable={codexAvailable}
                   onChange={setRuntime}
                 />
                 {runtime === "hermes" && hermesAvailable === false && (
@@ -241,6 +243,14 @@ export function AddAgentModal({
                     Install Claude Code, or restart Cursor from a terminal where{" "}
                     <code className="font-mono">claude --version</code> works. Until then this node
                     runs as pi.
+                  </p>
+                )}
+                {runtime === "codex" && codexAvailable === false && (
+                  <p className="text-[11px] leading-snug text-amber-400/90">
+                    The backend did not find <code className="font-mono">codex</code> on its PATH.
+                    Install Codex, or restart Cursor from a terminal where{" "}
+                    <code className="font-mono">codex --version</code> works. Unlike pi/hermes/claude,
+                    this node will not fall back — it will fail to start until Codex is available.
                   </p>
                 )}
               </div>
