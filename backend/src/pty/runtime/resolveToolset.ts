@@ -2,6 +2,8 @@
 export const PI_DEFAULT_TOOLSET = "read,bash,edit,write,grep";
 /** Hermes built-in toolset names covering file ops + shell (see `hermes tools list`). */
 export const HERMES_DEFAULT_TOOLSET = "file,terminal";
+/** Claude Code tool names for `--allowedTools` (capitalized, Claude's own vocabulary). */
+export const CLAUDE_DEFAULT_TOOLSET = "Read,Edit,Write,Bash,Grep,Glob";
 
 /**
  * Resolve the tool list a runtime passes on its command line: the `toolset`

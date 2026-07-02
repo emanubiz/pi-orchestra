@@ -26,6 +26,7 @@ export function AddAgentModal({
   onRefreshPrompts,
 }: AddAgentModalProps) {
   const hermesAvailable = useRuntimeStore((s) => s.hermesAvailable);
+  const claudeAvailable = useRuntimeStore((s) => s.claudeAvailable);
   const [step, setStep] = useState<Step>("pick");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<SystemPrompt | null>(null);
@@ -223,6 +224,7 @@ export function AddAgentModal({
                 <RuntimeSelector
                   value={runtime}
                   hermesAvailable={hermesAvailable}
+                  claudeAvailable={claudeAvailable}
                   onChange={setRuntime}
                 />
                 {runtime === "hermes" && hermesAvailable === false && (
@@ -233,9 +235,14 @@ export function AddAgentModal({
                     runs as pi.
                   </p>
                 )}
-                <p className="text-[10px] text-zinc-600">
-                  Claude and other runtimes will appear here when supported.
-                </p>
+                {runtime === "claude" && claudeAvailable === false && (
+                  <p className="text-[11px] leading-snug text-amber-400/90">
+                    The backend did not find <code className="font-mono">claude</code> on its PATH.
+                    Install Claude Code, or restart Cursor from a terminal where{" "}
+                    <code className="font-mono">claude --version</code> works. Until then this node
+                    runs as pi.
+                  </p>
+                )}
               </div>
             </div>
             <div className="flex justify-between gap-2 border-t border-white/5 px-4 py-3 shrink-0">

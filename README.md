@@ -7,7 +7,7 @@ is a real AI agent process (**pi** or **Hermes**, mixed freely) in its own PTY;
 edges define who may hand off to whom; you can type into any terminal at any
 time. Semi-automatic pipelines with a human in the loop on every node.
 
-- **Multi-runtime nodes** — `pi` (default) and `hermes --tui`, chosen per node; Claude Code planned
+- **Multi-runtime nodes** — `pi` (default), `hermes --tui` and **Claude Code**, chosen per node and mixed freely on one board
 - **One handoff standard** — agents delegate with `@@HANDOFF` text blocks, identical across runtimes, gated by graph edges
 - **Deterministic delivery** — closed-loop submit confirmation + handoff watchdog: tasks can't silently stall
 - **Kanban + Timeline** — cards advance with node status; every handoff is logged
@@ -84,6 +84,7 @@ Details: [`vscode-extension/README.md`](./vscode-extension/README.md),
 - `@earendil-works/pi-coding-agent` globally or in `backend/node_modules`
 - API keys in `~/.pi/agent/auth.json` or env vars
 - *(optional)* the `hermes` CLI on PATH to enable Hermes runtime nodes — auto-detected, zero further setup ([guide](./docs/guides/HERMES_RUNTIME.md))
+- *(optional)* the `claude` CLI on PATH to enable Claude Code runtime nodes — auto-detected ([guide](./docs/guides/CLAUDE_RUNTIME.md))
 
 ## Usage
 
@@ -200,7 +201,7 @@ See **[docs/guides/HERMES_RUNTIME.md](./docs/guides/HERMES_RUNTIME.md)** for ful
 
 Summary:
 
-- Each node: optional `runtime` (`"pi"` | `"hermes"`, default `"pi"`) — **chosen at creation**, locked afterward
+- Each node: optional `runtime` (`"pi"` | `"hermes"` | `"claude"`, default `"pi"`) — **chosen at creation**, locked afterward (Claude Code: [docs/guides/CLAUDE_RUNTIME.md](./docs/guides/CLAUDE_RUNTIME.md))
 - Use **+ Add agent** → prompt picker → runtime step (pi default, hermes when flag is on)
 - Feature flag: Hermes auto-detected on backend PATH (`PINODES_ORCHESTRA_HERMES=false` to disable)
 - Requires only the Hermes CLI on PATH — the orchestra plugin ships with the app and auto-installs + enables itself into `~/.hermes/plugins/` on first Hermes spawn (no manual setup)

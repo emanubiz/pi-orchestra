@@ -18,6 +18,7 @@ pinodes-orchestra/
     │   ├── MULTI_INSTANCE.md
     │   ├── EXTENSION_PUBLISHING.md
     │   ├── HERMES_RUNTIME.md          ← Hermes nodes: setup, UI, flags
+    │   ├── CLAUDE_RUNTIME.md          ← Claude Code nodes: setup, hooks, flags
     │   ├── HERMES_DESKTOP.md          ← Hermes Desktop host integration (future tab)
     │   └── TEST_COVERAGE.md
     │
@@ -73,7 +74,7 @@ Also: [`vscode-extension/README.md`](../vscode-extension/README.md) — Cursor /
 | **Hermes TUI runtime** (`runtime: "hermes"`) | ✅ Auto-detected when `hermes` on backend PATH |
 | Add-agent flow (prompt picker + pre-spawn runtime) | ✅ + button, view-only preview, runtime locked after create |
 | `runtimeConfig.toolset` | ✅ |
-| Claude Code runtime | 🔜 [plans/CLAUDE_CODE_RUNTIME_PLAN.md](./plans/CLAUDE_CODE_RUNTIME_PLAN.md) |
+| **Claude Code runtime** (`runtime: "claude"`) | 🧪 Implemented (`feat/claude-runtime`), pending manual QA — [guides/CLAUDE_RUNTIME.md](./guides/CLAUDE_RUNTIME.md) |
 | Cursor Agent runtime | ⏸️ [plans/CURSOR_RUNTIME_ANALYSIS.md](./plans/CURSOR_RUNTIME_ANALYSIS.md) (deferred; use pi-as-proxy) |
 | Hermes Desktop embedded tab | 🔜 Host-side work |
 | OpenClaw integration | 🔜 |

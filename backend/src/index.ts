@@ -17,6 +17,7 @@ import {
 } from "./db/index.js";
 import { ptyHub } from "./pty/PtyHub.js";
 import { isHermesRuntimeAvailable } from "./pty/runtime/hermesAvailability.js";
+import { isClaudeRuntimeAvailable } from "./pty/runtime/claudeAvailability.js";
 import { orchestraRoutes } from "./routes/orchestra.js";
 
 import type { WorkflowGraph } from "./types.js";
@@ -73,6 +74,7 @@ app.get("/api/health", async () => ({
   port: PORT,
   runtimes: {
     hermes: isHermesRuntimeAvailable(),
+    claude: isClaudeRuntimeAvailable(),
   },
 }));
 
@@ -86,6 +88,7 @@ app.get("/api/info", async () => ({
   wsPath: "/ws",
   runtimes: {
     hermes: isHermesRuntimeAvailable(),
+    claude: isClaudeRuntimeAvailable(),
   },
 }));
 

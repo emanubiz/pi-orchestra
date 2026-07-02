@@ -126,6 +126,23 @@ export PINODES_ORCHESTRA_HERMES=true   # optional override; auto-detect is the d
 
 > If `hermes` is not installed, the node should exit gracefully (not crash the backend).
 
+### 4-C. Claude Code Runtime Path — 3 min
+
+Requires the `claude` CLI on the backend PATH with auth configured (auto-detected;
+`PINODES_ORCHESTRA_CLAUDE=true` to force). Create a node with **runtime: claude** and run it.
+
+| Check | Expected | ✅/❌ |
+|-------|----------|------|
+| Claude spawns | Terminal shows the Claude Code TUI |  |
+| Ready signal | Injected task delivered without waiting for the 10s fallback (SessionStart hook fired) |  |
+| No permission prompt | Default toolset runs without a blocking approval dialog |  |
+| Appendix arrives | Agent knows its recipients/finality on turn 1 (UserPromptSubmit additionalContext) |  |
+| Handoff works | Claude node emits `@@HANDOFF … @@END`; delivered to a connected pi/hermes/claude node |  |
+| Submit confirmed | A delivered task starts a turn (watch disarmed; no "delivery may be stuck" error) |  |
+| Watchdog | Non-final claude node ending without handoff gets nudged ("Attempt N/3"), errors at cap |  |
+| Kill cleanup | Stopping the node leaves no orphaned `claude` processes (`pgrep -f claude`) |  |
+| Self-gating | A manually-launched `claude` outside Orchestra is unaffected (no orchestra hooks) |  |
+
 ---
 
 ## 5. Edge Cases (optional, 2 min)

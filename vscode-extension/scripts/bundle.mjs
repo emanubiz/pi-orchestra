@@ -231,6 +231,10 @@ copyDir(path.join(repoRoot, "backend", "pi-extensions"), path.join(serverDir, "b
 // here into ~/.hermes/plugins/orchestra so the app is self-sufficient for
 // Hermes handoffs without a manual setup step.
 copyDir(path.join(repoRoot, "backend", "hermes-plugins"), path.join(serverDir, "backend", "hermes-plugins"));
+// The Claude Code hook bridge (.mjs, shipped as-is): resolveClaudeSettings.ts
+// points `claude --settings` hooks at it via absolute path — same three-levels-up
+// layout as the repo, so dist and VSIX resolve identically.
+copyDir(path.join(repoRoot, "backend", "claude-hooks"), path.join(serverDir, "backend", "claude-hooks"));
 copyDir(frontendDist, path.join(serverDir, "frontend", "dist"));
 copyDir(path.join(repoRoot, "prompts"), path.join(serverDir, "prompts"));
 

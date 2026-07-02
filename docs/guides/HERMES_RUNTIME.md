@@ -10,12 +10,13 @@ How to run **Hermes TUI** agents on Orchestra nodes alongside **pi**.
 Each graph node has an optional `runtime` field:
 
 ```typescript
-runtime?: "pi" | "hermes";  // absent === "pi"
+runtime?: "pi" | "hermes" | "claude";  // absent === "pi"
 runtimeConfig?: { toolset?: string };  // non-secret; persisted in SQLite
 ```
 
 - **pi** — `pi` CLI + `call-agent.ts` extension (default)
 - **hermes** — `hermes --tui` in a PTY + `orchestra` plugin for handoff/watchdog
+- **claude** — see [CLAUDE_RUNTIME.md](./CLAUDE_RUNTIME.md)
 
 Mixed graphs (e.g. Architect on pi → Developer on Hermes) are supported.
 

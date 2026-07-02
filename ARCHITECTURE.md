@@ -20,11 +20,11 @@ live terminal backed by a real AI agent process (pi or hermes) in a PTY.
                                                    │
                               ┌────────────────────┼────────────────────┐
                               │                    │                    │
-                     ┌────────┴────────┐  ┌───────┴────────┐         ...
-                     │   PiRuntime     │  │ HermesRuntime  │
-                     │  (pi CLI + PTY) │  │(hermes --tui    │
-                     │  + call-agent   │  │  + PTY + plugin)│
-                     └─────────────────┘  └────────────────┘
+                     ┌────────┴────────┐  ┌───────┴────────┐  ┌────────┴────────┐
+                     │   PiRuntime     │  │ HermesRuntime  │  │  ClaudeRuntime  │
+                     │  (pi CLI + PTY) │  │(hermes --tui    │  │ (claude + PTY   │
+                     │  + call-agent   │  │  + PTY + plugin)│  │  + hook bridge) │
+                     └─────────────────┘  └────────────────┘  └─────────────────┘
 ```
 
 ## Backend layers
@@ -60,6 +60,16 @@ Spawns `hermes chat --tui` with `-t` / toolsets. Uses `HERMES_EPHEMERAL_SYSTEM_P
 env var for per-node system prompt isolation. Orchestration hooks run via a
 plugin in `~/.hermes/plugins/orchestra/`. Used when `hermes` is on the backend PATH (auto-detected).
 
+### ClaudeRuntime (`backend/src/pty/runtime/ClaudeRuntime.ts`)
+
+Spawns interactive `claude` with `--append-system-prompt`, `--allowedTools`
+(Claude's own tool vocabulary) and `--permission-mode acceptEdits`. Orchestration
+runs via lifecycle hooks passed **inline** with `--settings` (nothing written to
+`~/.claude`): one bundled bridge script (`backend/claude-hooks/orchestra-hook.mjs`)
+handles `SessionStart` → ready, `UserPromptSubmit` → turn-started + per-turn
+appendix (`additionalContext`), and `Stop` → sentinel parsing from the transcript
++ turn-ended. Used when `claude` is on the backend PATH (auto-detected).
+
 ### BoardManager (`backend/src/orchestra/BoardManager.ts`)
 
 CRUD for boards, graphs, nodes, edges. Validates graph consistency (no
@@ -77,13 +87,14 @@ self-loops, non-final nodes must have outgoing edges). Persists to SQLite.
 
 ```typescript
 interface WorkflowNode {
-  runtime?: "pi" | "hermes";  // absent = "pi" (backward compat)
+  runtime?: "pi" | "hermes" | "claude";  // absent = "pi" (backward compat)
   runtimeConfig?: Record<string, unknown>;  // model, toolset, flags (no secrets!)
 }
 ```
 
 PtyHub selects the runtime at spawn time:
 - `runtime: "hermes"` + `hermes` on backend PATH → HermesRuntime
+- `runtime: "claude"` + `claude` on backend PATH → ClaudeRuntime
 - Otherwise → PiRuntime (default)
 
 ## Handoff protocol
@@ -100,7 +111,7 @@ text is parsed* differs:
 |---|---|
 | **pi** | The `call-agent.ts` extension parses `agent_end` output and POSTs. Works on any provider, no tool support required. |
 | **Hermes** | The orchestra plugin's `transform_llm_output` hook parses the turn's output and POSTs — same protocol as pi, no bespoke tool. |
-| **Claude Code** *(planned)* | Same text protocol, parsed by its runtime shim. See [docs/plans/CLAUDE_CODE_RUNTIME_PLAN.md](./docs/plans/CLAUDE_CODE_RUNTIME_PLAN.md). |
+| **Claude Code** | The hook bridge (`claude-hooks/orchestra-hook.mjs`, `Stop` hook) parses the turn's final transcript message and POSTs — same protocol. Sentinels stay visible in the terminal (as with pi). |
 
 A text protocol (rather than a native tool) is deliberate: it is provider- and
 runtime-agnostic and can't break on a tool-schema/dispatch mismatch. The backend
@@ -114,10 +125,11 @@ Ensures non-final nodes always hand off:
 **pi**: extension's `agent_end` checks if the turn ended without
 handoff → re-prompts via `sendUserMessage` (max retries, then `handoff-failed`).
 
-**Hermes**: `post_llm_call` hook → `POST /internal/turn-ended`, handled by
-`PtyHub.handleTurnEnded` (owns the per-node retry count). If non-final and no
-handoff, it injects a nudge into the PTY (up to `MAX_TURN_ENDED_RETRIES`, 3),
-then reports the node as errored.
+**Hermes / Claude Code** (server-side, `SERVER_NUDGED_RUNTIMES`): the runtime
+bridge signals `POST /internal/turn-ended` (Hermes: `post_llm_call`; Claude:
+`Stop` hook), handled by `PtyHub.handleTurnEnded` (owns the per-node retry
+count). If non-final and no handoff, it injects a nudge into the PTY (up to
+`MAX_TURN_ENDED_RETRIES`, 3), then reports the node as errored.
 
 ## Closed-loop submit confirmation (plan B)
 
@@ -127,8 +139,9 @@ message sitting in the prompt, never sent (the pipeline then stalls silently).
 So the loop is closed on the *outcome*: the recipient starting a turn proves the
 message reached the model.
 
-- Both runtimes POST `/internal/turn-started` once per turn (pi:
-  `before_agent_start`; Hermes: `pre_llm_call`, gated once per turn).
+- Every runtime POSTs `/internal/turn-started` once per turn (pi:
+  `before_agent_start`; Hermes: `pre_llm_call`, gated once per turn; Claude:
+  `UserPromptSubmit` hook).
 - `PtyHub.injectAndWatch` arms a submit watch when the `\r` is written;
   `handleTurnStarted` disarms it (confirmed) and marks the node busy.
 - If the watch fires (`SUBMIT_CONFIRM_MS`, 1.5s) with no confirmation, it re-sends
@@ -174,4 +187,5 @@ Key points:
 | Flag | Default | Effect |
 |------|---------|--------|
 | `PINODES_ORCHESTRA_HERMES` | auto | Optional override for Hermes: default detects CLI on PATH; `false` off; `true` force on |
+| `PINODES_ORCHESTRA_CLAUDE` | auto | Optional override for Claude Code: same semantics as the Hermes flag |
 | `PINODES_ORCHESTRA_ENFORCE` | `true` | Default determinism watchdog state (can be toggled per-node) |

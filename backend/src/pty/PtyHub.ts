@@ -3,6 +3,8 @@ import { getPrompt } from "../db/index.js";
 import type { NodeRuntime, NodeStatus, WorkflowEdge, WorkflowGraph, WorkflowNode } from "../types.js";
 import { resolveCwd } from "../utils/paths.js";
 import type { INodeRuntime } from "./runtime/INodeRuntime.js";
+import { ClaudeRuntime } from "./runtime/ClaudeRuntime.js";
+import { isClaudeRuntimeAvailable } from "./runtime/claudeAvailability.js";
 import { HermesRuntime } from "./runtime/HermesRuntime.js";
 import { isHermesRuntimeAvailable } from "./runtime/hermesAvailability.js";
 import { PiRuntime } from "./runtime/PiRuntime.js";
@@ -17,9 +19,14 @@ const READY_SETTLE_MS = 250;
 const READY_FALLBACK_MS = 10_000;
 // Default for the determinism watchdog when a board has no explicit override.
 const ENFORCE_DEFAULT = process.env.PINODES_ORCHESTRA_ENFORCE !== "false";
-// Nudge retries for the Hermes turn-ended watchdog before a non-final node
+// Nudge retries for the server-side turn-ended watchdog before a non-final node
 // that won't hand off is reported as an error (see handleTurnEnded).
 const MAX_TURN_ENDED_RETRIES = 3;
+// Runtimes whose non-final-node handoff enforcement is server-side (the
+// turn-ended nudge in handleTurnEnded). pi is NOT here: its extension enforces
+// explicit intent client-side (enforceIntent at agent_end), so a server nudge
+// would double up.
+const SERVER_NUDGED_RUNTIMES: ReadonlySet<NodeRuntime> = new Set(["hermes", "claude"]);
 // ── Closed-loop submit confirmation (plan B) ─────────────────────────────────
 // After injecting a task (bracketed-paste + `\r`) we can't observe whether the
 // runtime's input line actually submitted it — a timing/async race can leave the
@@ -245,9 +252,9 @@ export class PtyHub {
     return this.graphs.get(boardId)?.nodes.get(nodeId)?.canBeFinal !== false;
   }
 
-  /** The runtime type of a node ("pi" | "hermes"); defaults to "pi" when absent.
-   *  Used to gate the server-side handoff nudge to Hermes only — pi enforces
-   *  explicit intent client-side in its extension (enforceIntent). */
+  /** The runtime type of a node; defaults to "pi" when absent. Used to gate the
+   *  server-side handoff nudge to SERVER_NUDGED_RUNTIMES — pi enforces explicit
+   *  intent client-side in its extension (enforceIntent). */
   private nodeRuntime(boardId: string, nodeId: string): NodeRuntime {
     return this.graphs.get(boardId)?.nodes.get(nodeId)?.runtime ?? "pi";
   }
@@ -390,11 +397,12 @@ export class PtyHub {
       this.connectionsAppendix(boardId, nodeId) +
       (this.kanbanBoards.has(boardId) ? this.kanbanAppendix() : "");
 
-    const hermesEnabled = isHermesRuntimeAvailable();
     const runtime: INodeRuntime =
-      node?.runtime === "hermes" && hermesEnabled
+      node?.runtime === "hermes" && isHermesRuntimeAvailable()
         ? new HermesRuntime()
-        : new PiRuntime();
+        : node?.runtime === "claude" && isClaudeRuntimeAvailable()
+          ? new ClaudeRuntime()
+          : new PiRuntime();
 
     const k = key(boardId, nodeId);
     this.ready.delete(k);
@@ -711,10 +719,15 @@ export class PtyHub {
     }
 
     const ctx = this.orchestraContext(boardId, nodeId);
-    // Server-side handoff nudge is Hermes-only: pi's extension enforces explicit
-    // intent itself (enforceIntent at agent_end). A final-capable node is free to
-    // end, so nothing to nudge either.
-    if (!ctx || ctx.canBeFinal || this.nodeRuntime(boardId, nodeId) !== "hermes") {
+    // Server-side handoff nudge only for runtimes without a client-side
+    // enforcer (see SERVER_NUDGED_RUNTIMES); pi enforces intent itself
+    // (enforceIntent at agent_end). A final-capable node is free to end,
+    // so nothing to nudge either.
+    if (
+      !ctx ||
+      ctx.canBeFinal ||
+      !SERVER_NUDGED_RUNTIMES.has(this.nodeRuntime(boardId, nodeId))
+    ) {
       return { ok: true };
     }
     if (handoffCalledThisTurn) {
