@@ -129,17 +129,6 @@ async function run() {
     stdio: ["ignore", "pipe", "pipe"],
   });
 
-  // Symlink mock as `codex` next to mock-codex.mjs
-  const mockDir = path.dirname(MOCK_CODEX);
-  const codexLink = path.join(mockDir, "codex");
-  await import("node:fs/promises").then((fs) =>
-    fs.writeFile(
-      codexLink,
-      `#!/usr/bin/env node\nimport '${MOCK_CODEX.replace(/\\/g, "\\\\")}';\n`,
-      { mode: 0o755 },
-    ),
-  );
-
   if (!(await waitForHealth())) {
     fail("Backend startup", "health check timed out");
     backend.kill("SIGTERM");

@@ -1,2 +1,2 @@
 #!/usr/bin/env node
-import '/workspace/scripts/mock-codex.mjs';
+import './mock-codex.mjs';
