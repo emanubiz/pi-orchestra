@@ -1,20 +1,26 @@
-# Changelog - v0.2.23
+# Changelog - v0.3.0
 
 > **Note:** The authoritative changelog lives in [`vscode-extension/CHANGELOG.md`](vscode-extension/CHANGELOG.md) (the published artifact for the marketplace). This file mirrors the release notes for the monorepo as a whole — code, docs, and CI — and is updated when a release is cut.
 
-## [0.2.23] - Unreleased
+## [0.3.0] - 2026-07-02
 
 ### Added
-- **Hermes Control Plane plan** (`docs/plans/HERMES_CONTROL_PLANE_PLAN.md`): consolidated active plan for letting Hermes control pinodes-orchestra through MCP tools first, with the Hermes Desktop tab as a thin iframe/webview host later. Supersedes the separate Hermes Desktop H2 plan.
+- **Codex structured runtime (fourth node runtime).** `CodexRuntime` runs headless via `codex exec --json` (one turn per inject) with thread resume, synthesized terminal output, and the same `@@HANDOFF` / `@@CARD` / `@@DONE` sentinel protocol as the PTY runtimes. Auto-detected from the `codex` CLI on the backend PATH; **no fallback to pi** when unavailable. New modules: `CodexRuntime.ts`, `codexEventFormat.ts`, `codexAvailability.ts`, shared `orchestra/sentinels.ts`.
+- **MCP control plane (`mcp-server/` workspace).** New stdio MCP server (`pinodes-orchestra-mcp`) exposes Orchestra REST operations to Hermes and other MCP hosts: health/info, board CRUD, graph read/write, run/stop/inject/status, and safe UI deep links. Local safety layer: `PINODES_ORCHESTRA_ALLOWED_ROOTS`, `PINODES_ORCHESTRA_MCP_MODE=safe`, JSONL audit logging for mutative tools.
+- **Workflow templates.** Built-in multi-agent graph templates (docs cleanup, feature dev, research, content) selectable from the empty-state gallery and `WorkflowPicker`.
+- **Smoke tooling for Codex.** `scripts/codex`, `scripts/codex-smoke.mjs`, `scripts/mock-codex.mjs` for local verification.
+- **Documentation:** `docs/guides/CODEX_RUNTIME.md`, `docs/guides/HERMES_CONTROL_PLANE.md`, active plan `docs/plans/HERMES_CONTROL_PLANE_PLAN.md`.
+- **Tests:** `CodexRuntime.test.ts`, `codexEventFormat.test.ts`, `codexAvailability.test.ts`, `sentinels.test.ts`, MCP server test suite (`mcp-server/test/*`).
 
 ### Changed
-- **Documentation refreshed to the three-runtime reality.** `ARCHITECTURE.md` ASCII diagram now shows ClaudeRuntime alongside PiRuntime and HermesRuntime. `PROGRAMMATIC_API.md` `/api/health` and `/api/info` examples include `runtimes: { hermes, claude }`; the `runtimeConfig.toolset` table lists all three runtimes; `WorkflowNode` interface shows `"claude"` in the union. `HERMES_RUNTIME.md` comparison table gained a Claude Code column with spawn args, hooks, and watchdog details.
-- **`README.md` config table** now lists `PINODES_ORCHESTRA_CLAUDE` (auto-detect override, same pattern as `PINODES_ORCHESTRA_HERMES`).
-- **Documentation decluttered:** shipped/deferred feasibility docs moved to `docs/archive/`; `docs/plans/` now contains only the active Hermes control-plane plan. Cursor native runtime and Zero runtime are retained as archived analyses, not active plans.
-- **`docs/guides/HERMES_DESKTOP.md`** shortened into an operator/positioning guide that points to the consolidated control-plane plan instead of duplicating implementation detail.
-- **`docs/roadmaps/EXTENSIONS_ROADMAP.md`** rewritten as a high-level sequencing roadmap: MCP control-plane first, Desktop tab second, OpenClaw/mobile/physical later; native Cursor/Zero runtimes deferred/rejected.
-- **`PRE_MERGE_TEST_CHECKLIST.md`** unbranded from `feat/multi-runtime` (now `main` branch), removed the manual `export PINODES_ORCHESTRA_HERMES=true` instruction (auto-detect is the default).
-- **Backend version** at `/api/health` and `/api/info` now reads from `backend/package.json` at boot instead of a hardcoded `"0.1.0"` string.
+- **`INodeRuntime` generalized** with `kind: "pty" | "structured"`; PTY family (`pi`, `hermes`, `claude`) vs structured (`codex`) documented in `ARCHITECTURE.md`.
+- **Frontend runtime selector** extended to four runtimes (`RuntimeSelector`, `RuntimeBadge`, `AddAgentModal`, `runtimeStore`, `runtimeKind` helpers). Codex nodes disable keyboard input; side panel shows structured-runtime hint.
+- **Type model** extended to `"codex"` across backend types/routes/WS and frontend types. `/api/health` and `/api/info` report `runtimes.codex`.
+- **Documentation refreshed to four-runtime reality:** `ARCHITECTURE.md`, `README.md`, `docs/README.md`, `PROGRAMMATIC_API.md`, runtime guides, roadmap (`EXTENSIONS_ROADMAP.md` — MCP first, Desktop tab second). Shipped/deferred plans moved to `docs/archive/`.
+- **`HERMES_DESKTOP.md`** shortened to operator/positioning guide pointing at the control-plane plan.
+- **`PRE_MERGE_TEST_CHECKLIST.md`** unbranded; Hermes auto-detect is default.
+- **Backend version** at `/api/health` and `/api/info` reads from `backend/package.json` at boot.
+- **Monorepo version** aligned to `0.3.0` across root, backend, frontend, extension, and `mcp-server`.
 
 ## [0.2.22] - 2026-07-02
 

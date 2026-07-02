@@ -38,7 +38,7 @@ const ALLOWED_ORIGINS = buildAllowedOrigins(PORT);
 
 // Read version from package.json so /api/health and /api/info always reflect
 // the current release without a manual string update.
-let VERSION = "0.1.0"; // fallback (overridden by package.json at boot in all real deployments)
+let VERSION = "0.3.0"; // fallback (overridden by package.json at boot in all real deployments)
 try {
   const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, "../package.json"), "utf8"));
   VERSION = pkg.version || VERSION;

@@ -204,7 +204,7 @@ GET /api/v1/orchestra/boards/:boardId/status
   boardId,
   cwd,
   label,
-  nodes: [{ nodeId, label, status, runtime, startedAt? }],   # runtime: "pi" | "hermes"
+  nodes: [{ nodeId, label, status, runtime, startedAt? }],   # runtime: "pi" | "hermes" | "claude" | "codex"
   edges: [{ sourceNodeId, targetNodeId }]
 }
 ```

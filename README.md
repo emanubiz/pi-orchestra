@@ -3,9 +3,10 @@
 [![Open VSX](https://img.shields.io/open-vsx/v/emanubiz/pinodes-orchestra-vscode?label=Open%20VSX)](https://open-vsx.org/extension/emanubiz/pinodes-orchestra-vscode)
 
 **Visual multi-agent orchestration on a canvas of live terminals.** Every node
-is a real AI agent process (**pi** or **Hermes**, mixed freely) in its own PTY;
-edges define who may hand off to whom; you can type into any terminal at any
-time. Semi-automatic pipelines with a human in the loop on every node.
+is a real AI agent process (**pi**, **Hermes**, **Claude Code**, or **Codex**,
+mixed freely per node); edges define who may hand off to whom; you can type into
+any interactive terminal at any time. Semi-automatic pipelines with a human in
+the loop on every node.
 
 - **Multi-runtime nodes** — `pi` (default), `hermes --tui`, **Claude Code**, and **Codex** (structured/headless), chosen per node and mixed freely on one board
 - **One handoff standard** — agents delegate with `@@HANDOFF` text blocks, identical across runtimes, gated by graph edges

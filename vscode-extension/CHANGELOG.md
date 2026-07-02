@@ -2,6 +2,24 @@
 
 All notable changes to the **PiNodes Orchestra** extension are documented here.
 
+## 0.3.0
+
+### Added
+
+- **Codex structured runtime (fourth node runtime).** `CodexRuntime` runs headless via `codex exec --json` with thread resume, synthesized terminal output, and the same `@@HANDOFF` / `@@CARD` / `@@DONE` sentinel protocol. Auto-detected from the `codex` CLI; no fallback to pi when unavailable. Keyboard input is disabled on Codex nodes — use **Run** or programmatic inject.
+- **MCP control plane (`mcp-server/`).** New stdio MCP server for Hermes and other MCP hosts to create boards, edit graphs, run flows, inject steering messages, and inspect status via Orchestra REST. Safe mode, allowed filesystem roots, and JSONL audit logging for mutative operations.
+- **Workflow templates.** Built-in multi-agent graph templates (docs cleanup, feature development, research, content) in the empty-state gallery and WorkflowPicker.
+- **Documentation:** `docs/guides/CODEX_RUNTIME.md`, `docs/guides/HERMES_CONTROL_PLANE.md`.
+- **Tests:** Codex runtime suite, shared sentinel tests, MCP server tests.
+
+### Changed
+
+- **Runtime selector** now shows four runtimes inline on node cards (`pi`, `hermes`, `claude`, `codex`).
+- **`INodeRuntime`** distinguishes PTY vs structured (`kind: "pty" | "structured"`).
+- **Type model** extended to `"codex"`; `/api/info` reports `runtimes.codex`.
+- **Documentation** refreshed for four-runtime reality and MCP-first Hermes integration roadmap.
+- **Extension version** bumped to `0.3.0` (aligned with monorepo release).
+
 ## 0.2.22
 
 ### Changed

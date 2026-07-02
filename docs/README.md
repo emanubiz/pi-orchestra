@@ -86,7 +86,7 @@ Also: [`vscode-extension/README.md`](../vscode-extension/README.md) — Cursor /
 | **Claude Code runtime** (`runtime: "claude"`) | ✅ Shipped — [guides/CLAUDE_RUNTIME.md](./guides/CLAUDE_RUNTIME.md) |
 | **Codex structured runtime** (`runtime: "codex"`) | ✅ Shipped — [guides/CODEX_RUNTIME.md](./guides/CODEX_RUNTIME.md) |
 | Add-agent flow + `runtimeConfig.toolset` | ✅ |
-| Hermes MCP control-plane | 🔜 Active plan — [HERMES_CONTROL_PLANE_PLAN.md](./plans/HERMES_CONTROL_PLANE_PLAN.md) |
+| Hermes MCP control-plane | ✅ Shipped — [guides/HERMES_CONTROL_PLANE.md](./guides/HERMES_CONTROL_PLANE.md); active plan for Desktop tab: [HERMES_CONTROL_PLANE_PLAN.md](./plans/HERMES_CONTROL_PLANE_PLAN.md) |
 | Hermes Desktop embedded tab | 🔜 Planned as thin host after MCP/control-plane |
 | Cursor Agent native runtime | ⏸️ Deferred; use VS Code extension in Cursor or pi-as-proxy. Archived analysis: [archive/CURSOR_RUNTIME_ANALYSIS.md](./archive/CURSOR_RUNTIME_ANALYSIS.md) |
 | Zero runtime | ❌ Not viable via PTY today; archived analysis: [archive/ZERO_RUNTIME_ANALYSIS.md](./archive/ZERO_RUNTIME_ANALYSIS.md) |

@@ -1,8 +1,8 @@
 {
   "name": "pinodes-orchestra",
   "private": true,
-  "version": "0.1.0",
-  "description": "Visual multi-agent orchestrator — live agent terminals (pi, Hermes) on a canvas (web/PWA)",
+  "version": "0.3.0",
+  "description": "Visual multi-agent orchestrator — live agent terminals (pi, Hermes, Claude Code, Codex) on a canvas (web/PWA)",
   "scripts": {
     "dev": "concurrently -n backend,frontend -c blue,green \"npm run dev -w backend\" \"npm run dev -w frontend\"",
     "build": "npm run build -w backend && npm run build -w frontend",
