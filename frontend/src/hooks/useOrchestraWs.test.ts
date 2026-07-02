@@ -76,7 +76,7 @@ describe("useOrchestraWs", () => {
   });
 
   function mount(boardId = "b1") {
-    return renderHook(() => useOrchestraWs(boardId, [], { n1: "Architect", n2: "Developer" }));
+    return renderHook(() => useOrchestraWs(boardId, { n1: "Architect", n2: "Developer" }));
   }
 
   it("opens a connection on mount and marks the store connected", () => {

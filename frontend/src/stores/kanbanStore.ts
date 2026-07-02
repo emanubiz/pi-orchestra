@@ -1,44 +1,22 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import {
+  COLUMN_ALIASES,
+  COLUMN_MIGRATION_MAP,
+  KANBAN_COLUMNS,
+  isValidColumn,
+  type KanbanColumn,
+  type KanbanColumnId,
+} from "../constants/kanban";
 
-export type KanbanColumnId = "todo" | "in_progress" | "test" | "review" | "done";
-
-export interface KanbanColumn {
-  id: KanbanColumnId;
-  label: string;
-}
-
-export const KANBAN_COLUMNS: KanbanColumn[] = [
-  { id: "todo", label: "To Do" },
-  { id: "in_progress", label: "In Progress" },
-  { id: "test", label: "Test" },
-  { id: "review", label: "Review" },
-  { id: "done", label: "Done" },
-];
-
-const COLUMN_IDS = new Set(KANBAN_COLUMNS.map((c) => c.id));
+// Re-export so existing consumers (e.g. useOrchestraWs) keep working.
+export { KANBAN_COLUMNS, isValidColumn, type KanbanColumn, type KanbanColumnId };
 
 /** Map free-form agent text to a column id (e.g. "in progress" → "in_progress"). */
 export function normalizeColumn(raw: string): KanbanColumnId | null {
   const t = raw.trim().toLowerCase().replace(/[\s-]+/g, "_");
-  const alias: Record<string, KanbanColumnId> = {
-    todo: "todo",
-    to_do: "todo",
-    backlog: "todo",
-    in_progress: "in_progress",
-    inprogress: "in_progress",
-    doing: "in_progress",
-    wip: "in_progress",
-    test: "test",
-    testing: "test",
-    qa: "test",
-    review: "review",
-    reviewing: "review",
-    done: "done",
-    completed: "done",
-  };
-  if (alias[t]) return alias[t];
-  return COLUMN_IDS.has(t as KanbanColumnId) ? (t as KanbanColumnId) : null;
+  if (COLUMN_ALIASES[t]) return COLUMN_ALIASES[t];
+  return isValidColumn(t) ? t : null;
 }
 
 export interface KanbanCard {
@@ -59,16 +37,6 @@ interface KanbanState {
   /** Move the card linked to a board (most recent, not yet done) to a column. */
   moveCardByBoard: (boardId: string, column: KanbanColumnId) => void;
 }
-
-const OLD_COLUMN_MAP: Record<string, KanbanColumnId> = {
-  backlog: "todo",
-  todo: "todo",
-  doing: "in_progress",
-  in_progress: "in_progress",
-  test: "test",
-  review: "review",
-  done: "done",
-};
 
 export const useKanbanStore = create<KanbanState>()(
   persist(
@@ -123,7 +91,7 @@ export const useKanbanStore = create<KanbanState>()(
         if (state?.cards) {
           state.cards = state.cards.map((c) => ({
             ...c,
-            column: OLD_COLUMN_MAP[c.column as string] ?? "todo",
+            column: COLUMN_MIGRATION_MAP[c.column as string] ?? "todo",
           }));
         }
         return state as KanbanState;

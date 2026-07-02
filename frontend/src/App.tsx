@@ -48,15 +48,6 @@ export function App() {
   const setDefaultCwd = useBoardStore((s) => s.setDefaultCwd);
   const bindWorkspace = useBoardStore((s) => s.bindWorkspace);
 
-  const boardEdges = useMemo(
-    () =>
-      activeBoard.snapshot.edges.map((e) => ({
-        source: e.source,
-        target: e.target,
-      })),
-    [activeBoard.snapshot.edges],
-  );
-
   const boardNodeLabels = useMemo(() => {
     const labels: Record<string, string> = {};
     for (const n of activeBoard.snapshot.nodes) {
@@ -65,7 +56,7 @@ export function App() {
     return labels;
   }, [activeBoard.snapshot.nodes]);
 
-  const { send } = useOrchestraWs(activeBoard.id, boardEdges, boardNodeLabels);
+  const { send } = useOrchestraWs(activeBoard.id, boardNodeLabels);
   const connected = useRuntimeStore((s) => s.connected);
   const prompts = useRuntimeStore((s) => s.prompts);
   const setPrompts = useRuntimeStore((s) => s.setPrompts);

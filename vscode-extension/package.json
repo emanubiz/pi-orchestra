@@ -2,7 +2,7 @@
   "name": "pinodes-orchestra-vscode",
   "displayName": "PiNodes Orchestra",
   "description": "Visual multi-agent pi console orchestrator inside VS Code — graph canvas, live terminals, visible handoffs.",
-  "version": "0.2.21",
+  "version": "0.2.22",
   "private": false,
   "publisher": "emanubiz",
   "license": "MIT",

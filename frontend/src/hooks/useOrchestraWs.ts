@@ -7,10 +7,6 @@ import { useTimelineCapture } from "./useTimelineCapture";
 
 export function useOrchestraWs(
   activeBoardId: string,
-  // TODO: `_edges` is unused — the timeline now derives handoffs from the
-  // canonical backend `handoff` event, not from edge inference. Drop this param
-  // (and the `boardEdges` memo in App.tsx that feeds it) on the next cleanup.
-  _edges: Array<{ source: string; target: string }>,
   nodeLabels: Record<string, string>,
 ) {
   const wsRef = useRef<WebSocket | null>(null);

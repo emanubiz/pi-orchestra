@@ -324,6 +324,10 @@ export class PtyHub {
    *  Runtime-agnostic: pi and Hermes both emit a `@@CARD:<column>` text line
    *  (parsed by the pi extension / the Hermes orchestra plugin respectively). */
   private kanbanAppendix(): string {
+    // NOTE: The column names below are a prompt-only string — they don't
+    // import from the frontend constants (the backend has no dependency on
+    // the frontend). When adding or renaming a Kanban column, update both
+    // this string AND frontend/src/constants/kanban.ts.
     return (
       "\n\n## Kanban — advancing the card\n" +
       "This work is tracked on a Kanban board with columns: To Do, In Progress, Test, Review, Done.\n" +

@@ -2,6 +2,16 @@
 
 All notable changes to the **PiNodes Orchestra** extension are documented here.
 
+## 0.2.22
+
+### Changed
+
+- **Kanban column constants centralized.** Column definitions, alias maps, and migration rules are now in a single source of truth (`frontend/src/constants/kanban.ts`): `KanbanColumnId`, `KANBAN_COLUMNS`, `COLUMN_ALIASES`, `COLUMN_MIGRATION_MAP`, and `isValidColumn()` are exported from one place. `kanbanStore.ts` imports and re-exports them; `normalizeColumn()` and the localStorage `migrate()` function now derive from the shared constants instead of maintaining separate inline maps. `PtyHub.kanbanAppendix()` has a sync comment so backend prompt strings stay aligned with the frontend definitions.
+- **Dead `_edges` parameter removed from `useOrchestraWs`.** The unused `boardEdges` argument (and the corresponding `useMemo` in `App.tsx`) was dropped. The timeline now derives handoffs exclusively from the canonical backend `handoff` event, not from edge inference.
+- **Dead code cleanup.** Removed `backend/pty-repro.mjs` (standalone node-pty reproduction script, unused and not part of the build).
+
+
+
 ## 0.2.21
 
 ### Added
@@ -40,7 +50,6 @@ All notable changes to the **PiNodes Orchestra** extension are documented here.
   inject but no restart), `runtime` (`"pi" | "hermes"`) on every node in
   `GET …/status`, and CLI `node stop` / `node restart` subcommands.
 
-### Fixed
 
 - **`POST /flows` no longer leaks a board on failure.** When the run step
   failed (e.g. a graph without `entryNodeId` and none provided), the request
@@ -101,7 +110,6 @@ All notable changes to the **PiNodes Orchestra** extension are documented here.
   (`hermes plugins enable orchestra`) automatically on first Hermes spawn — no
   manual `setup-hermes-plugin.sh`. The app now depends only on the Hermes binary.
 
-### Fixed
 
 - **Hermes nodes no longer fail with "Session not found".** `HermesRuntime` was
   spawning `hermes chat --tui … --resume <boardId-nodeId>`, but `--resume` only
@@ -191,7 +199,6 @@ All notable changes to the **PiNodes Orchestra** extension are documented here.
 
 ## 0.2.17
 
-### Fixed
 
 - **Node deletion now shows an in-app confirmation dialog** instead of relying on
   `window.confirm()`, which is silently blocked in VS Code webviews (always
@@ -249,7 +256,6 @@ All notable changes to the **PiNodes Orchestra** extension are documented here.
     The `"external"` backend status was removed accordingly. A pinned port already
     served by another orchestra backend now fails fast with a clear error.
 
-### Fixed
 
 - **Frontend API resolution no longer hardcodes `3847`.** `resolveBase()` (split into
   the pure, unit-tested `resolveBaseForLocation()`) now returns same-origin for any
@@ -276,7 +282,6 @@ All notable changes to the **PiNodes Orchestra** extension are documented here.
 
 ## 0.2.15
 
-### Fixed
 
 - **Windows: nodes couldn't see each other (orchestration extension never
   loaded).** On Windows the `pi` launcher on PATH is the npm batch shim
@@ -343,7 +348,6 @@ fixes a dev environment.
   cannot discover it. New pure function `resolveSessionToken()` in
   `sessionToken.ts` with dedicated unit tests (vitest).
 
-### Fixed
 
 - **`load_graph` with a stale `cwd` is now rejected** (WS `error` to the
   client) instead of silently falling back to `process.cwd()`, which
@@ -368,7 +372,6 @@ fixes a dev environment.
 
 ## 0.2.13
 
-### Fixed
 
 - **Linux / VS Code: copy/paste in pi terminals did nothing.** The UI runs in a
   cross-origin iframe inside the editor webview, where the browser Clipboard API
@@ -378,7 +381,6 @@ fixes a dev environment.
 
 ## 0.2.12
 
-### Fixed
 
 - **Intent watchdog crashed at end-of-turn on pi 0.79+.** When a pipeline node
   finished without `@@HANDOFF` or `@@DONE`, the extension injected
@@ -394,7 +396,6 @@ fixes a dev environment.
 
 ## 0.2.11
 
-### Fixed
 
 - **Agent terminals were black after an extension update.** The backend was
   spawned with the extension's install dir as its cwd (`<extension>/server/
@@ -428,7 +429,6 @@ fixes a dev environment.
 
 ## 0.2.9
 
-### Fixed
 
 - **Windows/macOS: agent nodes stuck on "starting pi"** because the packaged
   backend shipped without `node-pty`'s native binaries. Recent `node-pty` keeps
@@ -450,7 +450,6 @@ fixes a dev environment.
 
 ## 0.2.8
 
-### Fixed
 
 - **Windows: agent nodes failed to start** because the backend spawned the bare
   `pi` binary, which does not exist on Windows (the npm launcher is `pi.cmd`).

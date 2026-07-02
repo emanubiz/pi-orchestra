@@ -1,6 +1,13 @@
-# Changelog - v0.2.21
+# Changelog - v0.2.22
 
-> **Note:** The authoritative changelog lives in [`vscode-extension/CHANGELOG.md`](vscode-extension/CHANGELOG.md) (the published artifact for the marketplace). This file mirrors the 0.2.21 release notes for the monorepo as a whole — code, docs, and CI — and is updated when a release is cut.
+> **Note:** The authoritative changelog lives in [`vscode-extension/CHANGELOG.md`](vscode-extension/CHANGELOG.md) (the published artifact for the marketplace). This file mirrors the release notes for the monorepo as a whole — code, docs, and CI — and is updated when a release is cut.
+
+## [0.2.22] - 2026-07-02
+
+### Changed
+- **Kanban column constants centralized.** Column definitions, alias maps, and migration rules now live in a single source of truth (`frontend/src/constants/kanban.ts`): `KanbanColumnId`, `KANBAN_COLUMNS`, `COLUMN_ALIASES`, `COLUMN_MIGRATION_MAP`, and `isValidColumn()` are exported from one place. `kanbanStore.ts` imports and re-exports them; `normalizeColumn()` and the localStorage `migrate()` function now derive from the shared constants instead of maintaining separate inline maps. `PtyHub.kanbanAppendix()` has a sync comment so backend prompt strings stay aligned with the frontend definitions.
+- **Dead `_edges` parameter removed from `useOrchestraWs`.** The unused `boardEdges` argument (and the corresponding `useMemo` in `App.tsx`) was dropped. The timeline now derives handoffs exclusively from the canonical backend `handoff` event.
+- **Dead code cleanup.** Removed `backend/pty-repro.mjs` (standalone node-pty reproduction script, unused and not part of the build).
 
 ## [0.2.21] - 2026-07-02
 
