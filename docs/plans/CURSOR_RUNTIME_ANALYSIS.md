@@ -40,7 +40,7 @@ adapter implementing `INodeRuntime`.
 |---------|--------|-------------------|
 | **pi** (default) | ✅ Shipped | `@@HANDOFF` text block parsed by `call-agent.ts` |
 | **hermes** | ✅ Shipped (auto-detected on PATH) | **Same** `@@HANDOFF` text block, parsed by the plugin's `transform_llm_output` hook |
-| **claude** | 🔜 Planned | Same `@@HANDOFF` text protocol + lifecycle hooks — see [CLAUDE_CODE_RUNTIME_PLAN.md](./CLAUDE_CODE_RUNTIME_PLAN.md) |
+| **claude** | ✅ Shipped | Same `@@HANDOFF` text protocol + lifecycle hooks — [guides/CLAUDE_RUNTIME.md](../guides/CLAUDE_RUNTIME.md) |
 | **cursor** | 🔜 Deferred | Not implemented; this document |
 | **openclaw** | 🔜 Planned | Gateway RPC |
 

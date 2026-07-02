@@ -75,7 +75,7 @@ Handoff: same `@@HANDOFF` block or structured `call_agent` if Cursor exposes it.
 - Hermes Desktop **Orchestra tab** (iframe to localhost) — see [guides/HERMES_DESKTOP.md](../guides/HERMES_DESKTOP.md)
 - Optional: JSON-RPC gateway session per node (alternative to PTY) — not planned; PTY path is shipped
 
-### Claude Code (🧪 implemented — `feat/claude-runtime`, pending manual QA)
+### Claude Code (✅ shipped)
 
 - Spawn: interactive `claude` via `ClaudeRuntime` (same PTY/xterm path as pi/Hermes)
 - Handoff: **same `@@HANDOFF` text protocol**, parsed by the hook bridge (`claude-hooks/orchestra-hook.mjs`) at the `Stop` hook

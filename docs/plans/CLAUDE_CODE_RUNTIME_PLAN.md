@@ -1,8 +1,8 @@
 # Claude Code runtime — implementation plan (test-first)
 
 > **Date:** 2026-07-02 (v2 — full rewrite; supersedes the 2026-07-01 MCP-tool draft)
-> **Status:** 🧪 **implemented** on `feat/claude-runtime` (P0–P5 done; P6 manual
-> QA pending — see [checklist §4-C](../checklists/PRE_MERGE_TEST_CHECKLIST.md)).
+> **Status:** ✅ **shipped on `main`** (P0–P5 done; P6 manual QA optional — see
+> [checklist §4-C](../checklists/PRE_MERGE_TEST_CHECKLIST.md)).
 > Operational guide: [guides/CLAUDE_RUNTIME.md](../guides/CLAUDE_RUNTIME.md)
 > **Guiding principle:** same as the Hermes plan — every phase starts with tests,
 > never change existing behavior without tests that capture it, backward
