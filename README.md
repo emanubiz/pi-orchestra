@@ -109,6 +109,7 @@ Details: [`vscode-extension/README.md`](./vscode-extension/README.md),
 | `PINODES_ORCHESTRA_DATA_DIR` | SQLite location |
 | `PINODES_ORCHESTRA_TOKEN` | Optional shared secret for all API/internal routes and WebSocket handshakes (except `/api/health`) |
 | `PINODES_ORCHESTRA_HERMES` | *(auto)* | Optional override: `false` disables Hermes; `true` forces it on. Default: detect `hermes` on backend PATH |
+| `PINODES_ORCHESTRA_CLAUDE` | *(auto)* | Optional override: `false` disables Claude Code; `true` forces it on. Default: detect `claude` on backend PATH |
 | `VITE_API_BASE` | Custom backend URL at frontend build time |
 
 Two additional variables are set automatically by hosts and rarely need manual

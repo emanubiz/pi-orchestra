@@ -35,6 +35,16 @@ const PORT = Number(process.env.PORT ?? 3847);
 const HOST = process.env.PINODES_ORCHESTRA_HOST ?? "127.0.0.1";
 const ALLOWED_ORIGINS = buildAllowedOrigins(PORT);
 
+// Read version from package.json so /api/health and /api/info always reflect
+// the current release without a manual string update.
+let VERSION = "0.1.0"; // fallback (overridden by package.json at boot in all real deployments)
+try {
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, "../package.json"), "utf8"));
+  VERSION = pkg.version || VERSION;
+} catch {
+  // Keep the fallback; harmless.
+}
+
 // When launched by a host (e.g. the VS Code extension) that sets its own PID
 // here, watch it: if that parent process disappears, exit so we never linger
 // as an orphan holding the port. Standalone runs don't set this and are unaffected.
@@ -70,7 +80,7 @@ app.addHook("preHandler", async (req, reply) => {
 app.get("/api/health", async () => ({
   ok: true,
   name: "pinodes-orchestra",
-  version: "0.1.0",
+  version: VERSION,
   port: PORT,
   runtimes: {
     hermes: isHermesRuntimeAvailable(),
@@ -82,7 +92,7 @@ app.get("/api/health", async () => ({
 app.get("/api/info", async () => ({
   ok: true,
   name: "pinodes-orchestra",
-  version: "0.1.0",
+  version: VERSION,
   port: PORT,
   defaultCwd: process.cwd(),
   wsPath: "/ws",

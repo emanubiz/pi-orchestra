@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { FolderOpen } from "lucide-react";
+import { FolderOpen, Workflow } from "lucide-react";
 import { apiFetch } from "../lib/api";
+import { WORKFLOW_TEMPLATES } from "../lib/workflowTemplates";
 import type { SavedWorkflowListItem, WorkflowGraph } from "../types";
 
 interface WorkflowPickerProps {
@@ -60,23 +61,54 @@ export function WorkflowPicker({ cwd, currentId, onLoad, compact }: WorkflowPick
         {!compact && <span>Load…</span>}
       </button>
       {open && (
-        <div className="absolute top-full left-0 z-50 mt-1 w-56 max-h-48 overflow-y-auto rounded-lg border border-zinc-700/80 bg-zinc-900 shadow-xl shadow-black/40 p-1 fade-rise">
-          {workflows.length === 0 && (
-            <div className="px-3 py-2 text-xs text-zinc-500">No saved workflows</div>
-          )}
-          {workflows.map((w) => (
+        <div className="absolute top-full left-0 z-50 mt-1 w-64 max-h-80 overflow-y-auto rounded-lg border border-zinc-700/80 bg-zinc-900 shadow-xl shadow-black/40 p-1 fade-rise">
+          {/* Built-in templates */}
+          <div className="px-2.5 py-1">
+            <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+              <Workflow size={10} strokeWidth={2} />
+              Templates
+            </span>
+          </div>
+          {WORKFLOW_TEMPLATES.map((tpl) => (
             <button
-              key={w.id}
+              key={tpl.id}
               type="button"
-              onClick={() => void load(w.id)}
-              className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs transition-colors hover:bg-white/5 ${
-                w.id === currentId ? "text-zinc-100 bg-white/[0.06]" : "text-zinc-300"
-              }`}
+              onClick={() => {
+                onLoad({ ...tpl.graph, cwd });
+                setOpen(false);
+              }}
+              className="w-full text-left px-2.5 py-1.5 rounded-md text-xs transition-colors hover:bg-violet-500/10 text-zinc-300"
             >
-              <div className="font-medium truncate">{w.name}</div>
-              <div className="text-zinc-500">{new Date(w.updated_at).toLocaleString()}</div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm leading-none">{tpl.icon}</span>
+                <span className="font-medium truncate">{tpl.name}</span>
+              </div>
+              <div className="text-zinc-500 truncate mt-0.5">{tpl.graph.nodes.length} nodes · {tpl.category}</div>
             </button>
           ))}
+
+          {/* Saved workflows — only shown when there are some */}
+          {workflows.length > 0 && (
+            <>
+              <div className="mx-2 my-1 border-t border-white/5" />
+              <div className="px-2.5 py-1">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Saved</span>
+              </div>
+              {workflows.map((w) => (
+                <button
+                  key={w.id}
+                  type="button"
+                  onClick={() => void load(w.id)}
+                  className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs transition-colors hover:bg-white/5 ${
+                    w.id === currentId ? "text-zinc-100 bg-white/[0.06]" : "text-zinc-300"
+                  }`}
+                >
+                  <div className="font-medium truncate">{w.name}</div>
+                  <div className="text-zinc-500">{new Date(w.updated_at).toLocaleString()}</div>
+                </button>
+              ))}
+            </>
+          )}
         </div>
       )}
     </div>

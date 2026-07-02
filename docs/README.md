@@ -1,44 +1,47 @@
 # Documentation index
 
-Ordered map of all project documentation. **Start here** if you are lost among roadmaps, plans, and reviews.
+Ordered map of project documentation. **Start here** if you are lost.
 
 > **Language:** all documentation in this tree is **English**.
+> **Rule:** keep `plans/` for active implementation plans only. Feasibility studies and shipped plans go to `archive/`.
 
-```
+```text
 pinodes-orchestra/
 ├── README.md                          ← Quick start, config, prompt library
-├── ARCHITECTURE.md                    ← Current system design (backend, runtimes, handoff)
+├── ARCHITECTURE.md                    ← Current system design: backend, runtimes, handoff
 ├── prompts/*.md                       ← Built-in system prompt templates (29 roles)
 └── docs/
     ├── README.md                      ← You are here
     │
-    ├── guides/                        ← How it works today (operational)
+    ├── guides/                        ← Current operational behaviour
     │   ├── SECURITY.md
     │   ├── PROGRAMMATIC_API.md
     │   ├── MULTI_INSTANCE.md
     │   ├── EXTENSION_PUBLISHING.md
-    │   ├── HERMES_RUNTIME.md          ← Hermes nodes: setup, UI, flags
-    │   ├── CLAUDE_RUNTIME.md          ← Claude Code nodes: setup, hooks, flags
-    │   ├── HERMES_DESKTOP.md          ← Hermes Desktop host integration (future tab)
+    │   ├── HERMES_RUNTIME.md
+    │   ├── CLAUDE_RUNTIME.md
+    │   ├── HERMES_DESKTOP.md          ← Short operator guide; implementation lives in plan
     │   └── TEST_COVERAGE.md
     │
-    ├── roadmaps/                      ← Where we are going (vision & sequencing)
-    │   ├── EXTENSIONS_ROADMAP.md      ← Hosts (IDE, Hermes, OpenClaw) + runtimes
-    │   └── EXPANSION_MOBILE_AND_PHYSICAL.md
+    ├── plans/                         ← Active implementation plans only
+    │   └── HERMES_CONTROL_PLANE_PLAN.md ← Hermes MCP control-plane + Desktop tab
     │
-    ├── plans/                         ← Detailed implementation plans
-    │   ├── CLAUDE_CODE_RUNTIME_PLAN.md         ✅ shipped (Claude Code runtime)
-    │   └── CURSOR_RUNTIME_ANALYSIS.md          ⏸️ deferred (feasibility study)
+    ├── roadmaps/                      ← High-level sequencing / long horizon
+    │   ├── EXTENSIONS_ROADMAP.md
+    │   └── EXPANSION_MOBILE_AND_PHYSICAL.md
     │
     ├── checklists/
     │   └── PRE_MERGE_TEST_CHECKLIST.md
     │
-    ├── archive/                       ← Completed plans, spikes & pre-build analysis (historical)
-    │   ├── HERMES_TUI_IMPLEMENTATION_PLAN.md   ✅ completed (feat/multi-runtime)
+    ├── archive/                       ← Shipped/deferred/historical analysis
+    │   ├── CLAUDE_CODE_RUNTIME_PLAN.md         ✅ shipped
+    │   ├── HERMES_TUI_IMPLEMENTATION_PLAN.md   ✅ shipped
     │   ├── HERMES_TUI_SPIKE_RESULT.md
-    │   └── HERMES_TUI_IMPACT_ANALYSIS.md
+    │   ├── HERMES_TUI_IMPACT_ANALYSIS.md
+    │   ├── CURSOR_RUNTIME_ANALYSIS.md          ⏸️ deferred
+    │   └── ZERO_RUNTIME_ANALYSIS.md            ❌ not viable today
     │
-    └── reviews/                       ← Audit / review artifacts (point-in-time)
+    └── reviews/                       ← Point-in-time audits/reviews
         ├── AUDIT_REVIEW_hermes-tui-runtime.md
         └── REVIEW_optimization_multi_harness.md
 ```
@@ -54,9 +57,13 @@ Also: [`vscode-extension/README.md`](../vscode-extension/README.md) — Cursor /
 | Run the app locally or in Cursor | [README.md](../README.md) |
 | Understand backend + PTY + handoff | [ARCHITECTURE.md](../ARCHITECTURE.md) |
 | Use Hermes agent nodes | [guides/HERMES_RUNTIME.md](./guides/HERMES_RUNTIME.md) |
-| Call boards/flows from CI or scripts | [guides/PROGRAMMATIC_API.md](./guides/PROGRAMMATIC_API.md) |
+| Use Claude Code nodes | [guides/CLAUDE_RUNTIME.md](./guides/CLAUDE_RUNTIME.md) |
+| Let Hermes control Orchestra via MCP / plan the Desktop tab | [plans/HERMES_CONTROL_PLANE_PLAN.md](./plans/HERMES_CONTROL_PLANE_PLAN.md) |
+| Embed Orchestra in Hermes Desktop | [guides/HERMES_DESKTOP.md](./guides/HERMES_DESKTOP.md) + [plans/HERMES_CONTROL_PLANE_PLAN.md](./plans/HERMES_CONTROL_PLANE_PLAN.md) |
+| Call boards/flows from CI, scripts, MCP, or hosts | [guides/PROGRAMMATIC_API.md](./guides/PROGRAMMATIC_API.md) |
 | Build or sideload the VSIX | [guides/EXTENSION_PUBLISHING.md](./guides/EXTENSION_PUBLISHING.md) |
-| See what's shipped vs planned | [roadmaps/EXTENSIONS_ROADMAP.md](./roadmaps/EXTENSIONS_ROADMAP.md) |
+| See host/runtime sequencing | [roadmaps/EXTENSIONS_ROADMAP.md](./roadmaps/EXTENSIONS_ROADMAP.md) |
+| See mobile/physical long-horizon ideas | [roadmaps/EXPANSION_MOBILE_AND_PHYSICAL.md](./roadmaps/EXPANSION_MOBILE_AND_PHYSICAL.md) |
 | Pre-merge manual QA | [checklists/PRE_MERGE_TEST_CHECKLIST.md](./checklists/PRE_MERGE_TEST_CHECKLIST.md) |
 
 ---
@@ -71,15 +78,16 @@ Also: [`vscode-extension/README.md`](../vscode-extension/README.md) — Cursor /
 | Programmatic REST API | ✅ |
 | Per-window backend isolation (extension) | ✅ |
 | **pi runtime** (`runtime: "pi"`) | ✅ Default |
-| **Hermes TUI runtime** (`runtime: "hermes"`) | ✅ Auto-detected when `hermes` on backend PATH |
-| Add-agent flow (prompt picker + pre-spawn runtime) | ✅ + button, view-only preview, runtime locked after create |
-| `runtimeConfig.toolset` | ✅ |
+| **Hermes TUI runtime** (`runtime: "hermes"`) | ✅ Auto-detected when `hermes` is on backend PATH |
 | **Claude Code runtime** (`runtime: "claude"`) | ✅ Shipped — [guides/CLAUDE_RUNTIME.md](./guides/CLAUDE_RUNTIME.md) |
-| Cursor Agent runtime | ⏸️ [plans/CURSOR_RUNTIME_ANALYSIS.md](./plans/CURSOR_RUNTIME_ANALYSIS.md) (deferred; use pi-as-proxy) |
-| Hermes Desktop embedded tab | 🔜 Host-side work |
+| Add-agent flow + `runtimeConfig.toolset` | ✅ |
+| Hermes MCP control-plane | 🔜 Active plan — [HERMES_CONTROL_PLANE_PLAN.md](./plans/HERMES_CONTROL_PLANE_PLAN.md) |
+| Hermes Desktop embedded tab | 🔜 Planned as thin host after MCP/control-plane |
+| Cursor Agent native runtime | ⏸️ Deferred; use VS Code extension in Cursor or pi-as-proxy. Archived analysis: [archive/CURSOR_RUNTIME_ANALYSIS.md](./archive/CURSOR_RUNTIME_ANALYSIS.md) |
+| Zero runtime | ❌ Not viable via PTY today; archived analysis: [archive/ZERO_RUNTIME_ANALYSIS.md](./archive/ZERO_RUNTIME_ANALYSIS.md) |
 | OpenClaw integration | 🔜 |
 | Mobile companion / physical runtime | 🔜 [roadmaps/EXPANSION_MOBILE_AND_PHYSICAL.md](./roadmaps/EXPANSION_MOBILE_AND_PHYSICAL.md) |
-| Non-coding prompt library (research, writing, business, data) | ✅ 4 packs, 15 roles (29 built-ins total) |
+| Non-coding prompt library | ✅ 4 packs, 15 roles (29 built-ins total) |
 | Closed-loop submit confirmation (`/internal/turn-started`) | ✅ See [ARCHITECTURE.md](../ARCHITECTURE.md) |
 
 ---
@@ -88,11 +96,11 @@ Also: [`vscode-extension/README.md`](../vscode-extension/README.md) — Cursor /
 
 | Folder | When to add here |
 |--------|------------------|
-| `guides/` | Describes **current** behavior users/operators rely on |
-| `roadmaps/` | Multi-phase vision; update status columns as phases ship |
-| `plans/` | Step-by-step implementation spec for a feature branch |
-| `checklists/` | Repeatable QA / release gates |
-| `archive/` | Spikes and pre-build analysis — **read-only** after feature ships |
-| `reviews/` | Point-in-time audit/review; do not edit unless re-auditing |
+| `guides/` | Describes **current** behaviour users/operators rely on. |
+| `plans/` | Active implementation plans with clear owner/next action. Keep this small. |
+| `roadmaps/` | Multi-phase vision and sequencing; no implementation detail dumps. |
+| `checklists/` | Repeatable QA / release gates. |
+| `archive/` | Shipped plans, spikes, feasibility studies, rejected/deferred analyses. |
+| `reviews/` | Point-in-time audit/review artifacts; do not edit unless re-auditing. |
 
-When a plan is fully implemented, move it (and its supporting spikes) to `archive/` and mark it ✅ in this index.
+When a plan ships or gets deferred, move it to `archive/` and keep only a short pointer in the relevant roadmap/status table.

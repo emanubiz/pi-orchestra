@@ -2,7 +2,7 @@
 
 How to run **Claude Code** agents on Orchestra nodes alongside **pi** and **Hermes**.
 
-> Implementation plan: [plans/CLAUDE_CODE_RUNTIME_PLAN.md](../plans/CLAUDE_CODE_RUNTIME_PLAN.md)
+> Implementation plan: [archive/CLAUDE_CODE_RUNTIME_PLAN.md](../archive/CLAUDE_CODE_RUNTIME_PLAN.md)
 > (v2, text-sentinel protocol). Status: **shipped on `main`** — optional manual QA:
 > [checklist §4-C](../checklists/PRE_MERGE_TEST_CHECKLIST.md).
 

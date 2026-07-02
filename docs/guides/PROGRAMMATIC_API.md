@@ -27,10 +27,10 @@ Listen port is set by `PORT` (default 3847). `PINODES_ORCHESTRA_URL` overrides t
 
 ```http
 GET /api/health
-→ { ok, name, version, port, runtimes: { hermes } }
+→ { ok, name, version, port, runtimes: { hermes, claude } }
 
 GET /api/info
-→ { ok, name, version, port, defaultCwd, wsPath, runtimes: { hermes } }
+→ { ok, name, version, port, defaultCwd, wsPath, runtimes: { hermes, claude } }
 ```
 
 > Both endpoints are stable and used by host integrations (VSCode, Hermes, OpenClaw) for readiness checks.
@@ -394,12 +394,12 @@ silently ignored, so the shape can grow without a migration):
 
 | Field | Type | Effect | Runtimes |
 |---|---|---|---|
-| `toolset` | `string` | Overrides the default tool list passed as `--tools`/`-t`. **Runtime-specific vocabularies:** pi uses `read,bash,edit,write,grep` (default); Hermes uses its own toolset names (`file,terminal,web,…` — see `hermes tools list`, default `file,terminal`). Ignored if blank or not a string — falls back to that runtime's default. | pi, hermes |
+| `toolset` | `string` | Overrides the default tool list passed as `--tools`/`-t`/`--allowedTools`. **Runtime-specific vocabularies:** pi uses `read,bash,edit,write,grep` (default); Hermes uses its own toolset names (`file,terminal,web,…` — see `hermes tools list`, default `file,terminal`); Claude Code uses capitalized tool names (`Read,Edit,Write,Bash,Grep,Glob` — default `Read,Edit,Write,Bash,Grep,Glob`). Ignored if blank or not a string — falls back to that runtime's default. | pi, hermes, claude |
 
 ```typescript
 interface WorkflowNode {
   // ...existing fields
-  runtime?: "pi" | "hermes";           // ✅ implemented
+  runtime?: "pi" | "hermes" | "claude"; // ✅ implemented
   runtimeConfig?: Record<string, unknown>;  // ✅ implemented (no secrets!)
 }
 ```
