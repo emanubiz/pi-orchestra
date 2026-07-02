@@ -10,6 +10,8 @@ interface RuntimeSelectorProps {
   hermesAvailable?: boolean | null;
   /** null = unknown (no warning yet). */
   claudeAvailable?: boolean | null;
+  /** null = unknown (no warning yet). */
+  codexAvailable?: boolean | null;
   className?: string;
 }
 
@@ -17,6 +19,7 @@ const OPTIONS: Array<{ value: NodeRuntime; label: string; short: string }> = [
   { value: "pi", label: "pi", short: "pi" },
   { value: "hermes", label: "hermes", short: "hm" },
   { value: "claude", label: "claude", short: "cc" },
+  { value: "codex", label: "codex", short: "cx" },
 ];
 
 /** Active-state accent per runtime (pi stays neutral). */
@@ -24,6 +27,7 @@ const ACTIVE_CLASS: Record<NodeRuntime, string> = {
   pi: "bg-white/10 text-zinc-100",
   hermes: "bg-purple-500/20 text-purple-300",
   claude: "bg-orange-500/20 text-orange-300",
+  codex: "bg-sky-500/20 text-sky-300",
 };
 
 const UNAVAILABLE_HINT: Record<string, string> = {
@@ -31,6 +35,8 @@ const UNAVAILABLE_HINT: Record<string, string> = {
     "Hermes CLI not found on the backend PATH (install Hermes or restart the IDE from a shell that has it)",
   claude:
     "Claude Code CLI not found on the backend PATH (install Claude Code or restart the IDE from a shell that has it)",
+  codex:
+    "Codex CLI not found on the backend PATH (install Codex or restart the IDE from a shell that has it)",
 };
 
 export function RuntimeSelector({
@@ -40,11 +46,13 @@ export function RuntimeSelector({
   disabled,
   hermesAvailable,
   claudeAvailable,
+  codexAvailable,
   className = "",
 }: RuntimeSelectorProps) {
   const availability: Partial<Record<NodeRuntime, boolean | null | undefined>> = {
     hermes: hermesAvailable,
     claude: claudeAvailable,
+    codex: codexAvailable,
   };
   const selectedUnavailable = availability[value] === false;
   const compact = variant === "compact";
@@ -54,7 +62,11 @@ export function RuntimeSelector({
       className={`flex items-center gap-1 ${className}`}
       title={
         selectedUnavailable
-          ? `${value} selected but its CLI was not found on the backend PATH — node will run as pi`
+          ? `${value} selected but its CLI was not found on the backend PATH — ${
+              value === "codex"
+                ? "node will fail to start until Codex is installed"
+                : "node will run as pi"
+            }`
           : "Agent runtime for this node"
       }
     >

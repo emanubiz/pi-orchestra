@@ -18,6 +18,7 @@ const INJECT_SUBMIT_MAX_MS = 1_200;
  * Subclasses only need to implement `spawn()` — the rest is common.
  */
 export abstract class PtyRuntime implements INodeRuntime {
+  readonly kind = "pty" as const;
   protected ptyInstance: IPty | null = null;
   protected _cols = 80;
   protected _rows = 24;

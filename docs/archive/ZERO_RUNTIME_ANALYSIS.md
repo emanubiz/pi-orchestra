@@ -14,8 +14,8 @@
 > Companion docs:
 > [`ARCHITECTURE.md`](../../ARCHITECTURE.md) (runtime model),
 > [`roadmaps/EXTENSIONS_ROADMAP.md`](../roadmaps/EXTENSIONS_ROADMAP.md) (sequencing),
-> [`plans/CLAUDE_CODE_RUNTIME_PLAN.md`](./CLAUDE_CODE_RUNTIME_PLAN.md) (preferred next runtime),
-> [`plans/CURSOR_RUNTIME_ANALYSIS.md`](./CURSOR_RUNTIME_ANALYSIS.md) (same kind of analysis, different runtime),
+> [`CLAUDE_CODE_RUNTIME_PLAN.md`](./CLAUDE_CODE_RUNTIME_PLAN.md) (preferred next runtime),
+> [`CURSOR_RUNTIME_ANALYSIS.md`](./CURSOR_RUNTIME_ANALYSIS.md) (same kind of analysis, different runtime),
 > [`guides/HERMES_RUNTIME.md`](../guides/HERMES_RUNTIME.md) (reference implementation).
 
 **Date:** 2026-07-02

@@ -1,6 +1,7 @@
 import type { WebSocket } from "@fastify/websocket";
 import { ptyHub } from "../pty/PtyHub.js";
 import { isHermesRuntimeAvailable } from "../pty/runtime/hermesAvailability.js";
+import { isCodexRuntimeAvailable } from "../pty/runtime/codexAvailability.js";
 import { isClaudeRuntimeAvailable } from "../pty/runtime/claudeAvailability.js";
 import type { WorkflowGraph } from "../types.js";
 import { resolveCwd } from "../utils/paths.js";
@@ -39,7 +40,11 @@ export function attachWebSocket(ws: WebSocket): void {
   ws.send(
     JSON.stringify({
       type: "connected",
-      runtimes: { hermes: isHermesRuntimeAvailable(), claude: isClaudeRuntimeAvailable() },
+      runtimes: {
+        hermes: isHermesRuntimeAvailable(),
+        claude: isClaudeRuntimeAvailable(),
+        codex: isCodexRuntimeAvailable(),
+      },
     }),
   );
 }

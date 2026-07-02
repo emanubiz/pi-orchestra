@@ -4,7 +4,8 @@
 
 PiNodes Orchestra is a web application (React + Fastify + WebSocket + SQLite + PTY)
 that provides a visual canvas of agent consoles. Each node on the canvas is a
-live terminal backed by a real AI agent process (pi or hermes) in a PTY.
+live terminal backed by a real AI agent process — **pi**, **Hermes**, **Claude Code**
+(PTY family), or **Codex** (structured/headless) — chosen per node.
 
 ```
 ┌─────────────────────┐     WebSocket      ┌──────────────────────┐
@@ -18,13 +19,21 @@ live terminal backed by a real AI agent process (pi or hermes) in a PTY.
                                           │  (runtime-agnostic)│
                                           └────────┬───────────┘
                                                    │
-                              ┌────────────────────┼────────────────────┐
-                              │                    │                    │
-                     ┌────────┴────────┐  ┌───────┴────────┐  ┌────────┴────────┐
-                     │   PiRuntime     │  │ HermesRuntime  │  │  ClaudeRuntime  │
-                     │  (pi CLI + PTY) │  │(hermes --tui    │  │ (claude + PTY   │
-                     │  + call-agent   │  │  + PTY + plugin)│  │  + hook bridge) │
-                     └─────────────────┘  └────────────────┘  └─────────────────┘
+          ┌───────────────────────────────┼───────────────────────────────┐
+          │                               │                               │
+ ┌────────┴────────┐  ┌──────────────────┴──────────┐  ┌─────────────────┴─────────┐
+ │   PiRuntime     │  │     HermesRuntime           │  │    ClaudeRuntime          │
+ │  (pi CLI + PTY) │  │  (hermes --tui + PTY        │  │  (claude + PTY            │
+ │  + call-agent   │  │   + orchestra plugin)       │  │   + --settings hook       │
+ └─────────────────┘  └─────────────────────────────┘  └───────────────────────────┘
+          │
+          │  structured (headless, one turn per inject)
+          ▼
+ ┌─────────────────┐
+ │  CodexRuntime   │
+ │ (codex exec     │
+ │  --json)        │
+ └─────────────────┘
 ```
 
 ## Backend layers
@@ -40,9 +49,9 @@ Central orchestrator — runtime-agnostic. Manages:
 
 ### INodeRuntime (`backend/src/pty/runtime/INodeRuntime.ts`)
 
-Interface abstracting PTY operations. Methods: `spawn(config)`, `write(data)`,
+Interface abstracting node runtime operations. Methods: `spawn(config)`, `write(data)`,
 `inject(message)`, `resize(cols, rows)`, `kill()`, `markReady()`, `isRunning()`,
-`isReady()`, `size()`.
+`isReady()`, `size()`. Each implementation exposes `readonly kind: "pty" | "structured"`.
 
 ### PtyRuntime (`backend/src/pty/runtime/PtyRuntime.ts`)
 
@@ -70,6 +79,23 @@ handles `SessionStart` → ready, `UserPromptSubmit` → turn-started + per-turn
 appendix (`additionalContext`), and `Stop` → sentinel parsing from the transcript
 + turn-ended. Used when `claude` is on the backend PATH (auto-detected).
 
+### CodexRuntime (`backend/src/pty/runtime/CodexRuntime.ts`)
+
+Structured (headless) runtime — `kind = "structured"`. Uses `codex exec --json`
+(one turn per inject) instead of a long-lived PTY. Thread id is retained across
+turns via `codex exec resume`. Orchestration (ready, turn-started/ended, handoff
+delivery) runs in-process via `RuntimeOrchestrationHooks` on `RuntimeSpawnConfig`
+— no external bridge. Sentinel parsing uses `backend/src/orchestra/sentinels.ts`.
+Used when `codex` is on the backend PATH (auto-detected). Does **not** fall back
+to pi when unavailable.
+
+### Runtime families
+
+| Family | Runtimes | Model |
+|--------|----------|-------|
+| PTY | `pi`, `hermes`, `claude` | Long-lived interactive terminal process |
+| Structured | `codex` | Thread/session + one turn per inject; synthesized terminal output |
+
 ### BoardManager (`backend/src/orchestra/BoardManager.ts`)
 
 CRUD for boards, graphs, nodes, edges. Validates graph consistency (no
@@ -87,12 +113,13 @@ self-loops, non-final nodes must have outgoing edges). Persists to SQLite.
 
 ```typescript
 interface WorkflowNode {
-  runtime?: "pi" | "hermes" | "claude";  // absent = "pi" (backward compat)
-  runtimeConfig?: Record<string, unknown>;  // model, toolset, flags (no secrets!)
+  runtime?: "pi" | "hermes" | "claude" | "codex";  // absent = "pi"
+  runtimeConfig?: Record<string, unknown>;  // model, sandbox, flags (no secrets!)
 }
 ```
 
 PtyHub selects the runtime at spawn time:
+- `runtime: "codex"` → CodexRuntime (no pi fallback if CLI missing — terminal shows error)
 - `runtime: "hermes"` + `hermes` on backend PATH → HermesRuntime
 - `runtime: "claude"` + `claude` on backend PATH → ClaudeRuntime
 - Otherwise → PiRuntime (default)
@@ -112,6 +139,7 @@ text is parsed* differs:
 | **pi** | The `call-agent.ts` extension parses `agent_end` output and POSTs. Works on any provider, no tool support required. |
 | **Hermes** | The orchestra plugin's `transform_llm_output` hook parses the turn's output and POSTs — same protocol as pi, no bespoke tool. |
 | **Claude Code** | The hook bridge (`claude-hooks/orchestra-hook.mjs`, `Stop` hook) parses the turn's final transcript message and POSTs — same protocol. Sentinels stay visible in the terminal (as with pi). |
+| **Codex** | `CodexRuntime` parses the final assistant text in-process at turn end (same regexes in `orchestra/sentinels.ts`). |
 
 A text protocol (rather than a native tool) is deliberate: it is provider- and
 runtime-agnostic and can't break on a tool-schema/dispatch mismatch. The backend
@@ -125,9 +153,9 @@ Ensures non-final nodes always hand off:
 **pi**: extension's `agent_end` checks if the turn ended without
 handoff → re-prompts via `sendUserMessage` (max retries, then `handoff-failed`).
 
-**Hermes / Claude Code** (server-side, `SERVER_NUDGED_RUNTIMES`): the runtime
-bridge signals `POST /internal/turn-ended` (Hermes: `post_llm_call`; Claude:
-`Stop` hook), handled by `PtyHub.handleTurnEnded` (owns the per-node retry
+**Hermes / Claude Code / Codex** (server-side, `SERVER_NUDGED_RUNTIMES`): the runtime
+bridge signals turn-ended (Hermes: `post_llm_call`; Claude: `Stop` hook; Codex:
+in-process at turn completion), handled by `PtyHub.handleTurnEnded` (owns the per-node retry
 count). If non-final and no handoff, it injects a nudge into the PTY (up to
 `MAX_TURN_ENDED_RETRIES`, 3), then reports the node as errored.
 

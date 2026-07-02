@@ -27,10 +27,10 @@ Listen port is set by `PORT` (default 3847). `PINODES_ORCHESTRA_URL` overrides t
 
 ```http
 GET /api/health
-→ { ok, name, version, port, runtimes: { hermes } }
+→ { ok, name, version, port, runtimes: { hermes, claude, codex } }
 
 GET /api/info
-→ { ok, name, version, port, defaultCwd, wsPath, runtimes: { hermes } }
+→ { ok, name, version, port, defaultCwd, wsPath, runtimes: { hermes, claude, codex } }
 ```
 
 > Both endpoints are stable and used by host integrations (VSCode, Hermes, OpenClaw) for readiness checks.
@@ -204,7 +204,7 @@ GET /api/v1/orchestra/boards/:boardId/status
   boardId,
   cwd,
   label,
-  nodes: [{ nodeId, label, status, runtime, startedAt? }],   # runtime: "pi" | "hermes"
+  nodes: [{ nodeId, label, status, runtime, startedAt? }],   # runtime: "pi" | "hermes" | "claude" | "codex"
   edges: [{ sourceNodeId, targetNodeId }]
 }
 ```
@@ -374,17 +374,18 @@ ws.onopen = () => {
 
 ## Node runtime field (implemented)
 
-`runtime?: "pi" | "hermes" | "claude"` and `runtimeConfig?: Record<string, unknown>`.
-Hermes and Claude Code are auto-detected when their CLIs are on the backend PATH
-(see [HERMES_RUNTIME.md](./HERMES_RUNTIME.md), [CLAUDE_RUNTIME.md](./CLAUDE_RUNTIME.md)).
-Optional `PINODES_ORCHESTRA_HERMES` / `PINODES_ORCHESTRA_CLAUDE` (`false` disables,
-`true` forces on).
+`runtime?: "pi" | "hermes" | "claude" | "codex"` and `runtimeConfig?: Record<string, unknown>`.
+Hermes, Claude Code, and Codex are auto-detected when their CLIs are on the backend PATH
+(see [HERMES_RUNTIME.md](./HERMES_RUNTIME.md), [CLAUDE_RUNTIME.md](./CLAUDE_RUNTIME.md),
+[CODEX_RUNTIME.md](./CODEX_RUNTIME.md)).
+Optional `PINODES_ORCHESTRA_HERMES` / `PINODES_ORCHESTRA_CLAUDE` / `PINODES_ORCHESTRA_CODEX`
+(`false` disables, `true` forces on).
 
 In the **web UI**, runtime is set when creating a node (`POST` equivalent via the add-agent
 flow) and is not editable afterward. The REST API still accepts `runtime` on `PATCH` for
 programmatic updates (restarting the PTY is the caller's responsibility).
 
-**Validation (400):** `runtime` must be one of `pi` | `hermes` | `claude` (unknown
+**Validation (400):** `runtime` must be one of `pi` | `hermes` | `claude` | `codex` (unknown
 values are rejected, not silently persisted); `runtimeConfig` must be a plain object;
 on `PATCH`, `label`/`promptId` must be non-empty strings, `position` must be
 `{ x: number, y: number }`, and `canBeFinal` a boolean.
@@ -394,12 +395,17 @@ silently ignored, so the shape can grow without a migration):
 
 | Field | Type | Effect | Runtimes |
 |---|---|---|---|
-| `toolset` | `string` | Overrides the default tool list passed as `--tools`/`-t`. **Runtime-specific vocabularies:** pi uses `read,bash,edit,write,grep` (default); Hermes uses its own toolset names (`file,terminal,web,…` — see `hermes tools list`, default `file,terminal`). Ignored if blank or not a string — falls back to that runtime's default. | pi, hermes |
+| `toolset` | `string` | Overrides the default tool list passed as `--tools`/`-t`/`--allowedTools`. **Runtime-specific vocabularies:** pi uses `read,bash,edit,write,grep` (default); Hermes uses its own toolset names (`file,terminal,web,…` — see `hermes tools list`, default `file,terminal`); Claude Code uses capitalized tool names (`Read,Edit,Write,Bash,Grep,Glob` — default `Read,Edit,Write,Bash,Grep,Glob`). Ignored if blank or not a string — falls back to that runtime's default. | pi, hermes, claude |
+| `model` | `string` | Codex model id (`-m`) | codex |
+| `sandbox` | `string` | Codex sandbox policy: `read-only`, `workspace-write`, `danger-full-access` | codex |
+| `approvalMode` | `string` | Codex approval mode: `untrusted`, `on-request`, `never` | codex |
+| `profile` | `string` | Codex profile name | codex |
+| `resumeThreadId` | `string` | Resume an existing Codex thread instead of starting fresh | codex |
 
 ```typescript
 interface WorkflowNode {
   // ...existing fields
-  runtime?: "pi" | "hermes";           // ✅ implemented
+  runtime?: "pi" | "hermes" | "claude" | "codex";  // ✅ implemented
   runtimeConfig?: Record<string, unknown>;  // ✅ implemented (no secrets!)
 }
 ```
@@ -409,6 +415,7 @@ interface WorkflowNode {
 | `pi` (default) | `pi` CLI via PtyHub → PiRuntime |
 | `hermes` | `hermes --tui` via PtyHub → HermesRuntime (auto-detected) |
 | `claude` | `claude` via PtyHub → ClaudeRuntime (auto-detected) |
+| `codex` | `codex exec --json` via PtyHub → CodexRuntime (auto-detected; structured, no pi fallback) |
 | `cursor` | deferred (feasibility study) |
 | `openclaw` | planned |
 
