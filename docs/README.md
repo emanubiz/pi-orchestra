@@ -21,6 +21,7 @@ pinodes-orchestra/
     │   ├── CLAUDE_RUNTIME.md          ← Claude Code nodes: setup, hooks, flags
     │   ├── CODEX_RUNTIME.md           ← Codex structured nodes: setup, config, smoke
     │   ├── HERMES_DESKTOP.md          ← Hermes Desktop host integration (future tab)
+    │   ├── HERMES_CONTROL_PLANE.md   ← MCP server for Hermes control-plane access
     │   └── TEST_COVERAGE.md
     │
     ├── roadmaps/                      ← Where we are going (vision & sequencing)
@@ -57,6 +58,7 @@ Also: [`vscode-extension/README.md`](../vscode-extension/README.md) — Cursor /
 | Understand backend + PTY + handoff | [ARCHITECTURE.md](../ARCHITECTURE.md) |
 | Use Hermes agent nodes | [guides/HERMES_RUNTIME.md](./guides/HERMES_RUNTIME.md) |
 | Use Codex structured nodes | [guides/CODEX_RUNTIME.md](./guides/CODEX_RUNTIME.md) |
+| Connect Hermes to the MCP control plane | [guides/HERMES_CONTROL_PLANE.md](./guides/HERMES_CONTROL_PLANE.md) |
 | Call boards/flows from CI or scripts | [guides/PROGRAMMATIC_API.md](./guides/PROGRAMMATIC_API.md) |
 | Build or sideload the VSIX | [guides/EXTENSION_PUBLISHING.md](./guides/EXTENSION_PUBLISHING.md) |
 | See what's shipped vs planned | [roadmaps/EXTENSIONS_ROADMAP.md](./roadmaps/EXTENSIONS_ROADMAP.md) |

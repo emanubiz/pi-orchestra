@@ -10,7 +10,8 @@
   },
   "workspaces": [
     "backend",
-    "frontend"
+    "frontend",
+    "mcp-server"
   ],
   "devDependencies": {
     "concurrently": "^9.1.2"
