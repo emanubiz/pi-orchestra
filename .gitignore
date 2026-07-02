@@ -19,8 +19,8 @@ data/
 
 # Editor / OS / tooling
 .DS_Store
-.claude/*
-!.claude/settings.json
+.claude/
+.commandcode/
 .vscode/
 .idea/
 
